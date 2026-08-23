@@ -1,0 +1,131 @@
+# Hardware Map — Echo Show 8 (1st gen, 2019)
+
+The inventory every device **Binding** for the Show 8 depends on — the analogue
+of what `SETUP.md` records for the Echo Dot. Produced by discovery on a real
+device (issue #1). Terms in **bold** are defined in [CONTEXT.md](../CONTEXT.md).
+
+**Device:** Amazon Echo Show 8, 1st gen (2019). SoC **MediaTek MT8163**
+(quad-core Cortex-A53). Two 2″ stereo speakers; mic array; 1MP camera with a
+physical shutter. LineageOS port codename **`crown`** (XDA unofficial).
+
+> **Codename note.** The LineageOS port and every device prop report **`crown`**
+> (`ro.product.device=crown`, `lineage_crown`). Our plan/ADR-0001 named the
+> build tag `hoya`; that was a guess. The build tag is ours to choose, but
+> **`crown` is what the platform actually calls itself** — reconcile before
+> issue #2 picks the tag name.
+
+## Platform
+
+| Property | Value | Source |
+|---|---|---|
+| CPU ABI | `armeabi-v7a` (32-bit; `abilist=armeabi-v7a,armeabi`) | `getprop ro.product.cpu.abi` |
+| Go target | `GOARCH=arm GOARM=7` (no 64-bit userspace) | derived |
+| Android API | **30** (Android 11) | `getprop ro.build.version.sdk` |
+| ROM | LineageOS `18.1-20260624-UNOFFICIAL-crown` | `getprop ro.lineage.version` |
+| SELinux | **Permissive** | `getenforce`, `ro.boot.selinux` |
+| Root | userdebug — `adb root` restarts adbd as uid 0. **No `su` binary, no Magisk.** | `adb root`; `id` → `uid=0 ... context=u:r:su:s0` |
+
+The Dot boots with a bogus pre-NTP clock; note the Show's `adb root` gives a
+real root shell without Magisk, so provisioning does not need a `su` wrapper.
+
+## Audio
+
+Single sound card **`card0`** (`mtsndcard`, `mt-snd-card`). MediaTek exposes
+many front-end PCMs (`/proc/asound/pcm`); the app-facing endpoints are the
+MultiMedia1 front-ends, with the physical codecs reached via `tinymix` routing.
+
+| Role | ALSA | Physical codec | Format |
+|---|---|---|---|
+| **Mic (capture)** | `card0,device22` (`TLV320AIC3101 Capture`) | **2× TLV320AIC3101** (I²C `0-0018`/`0-0019`, 4 mics) | **6ch, 16000 Hz, `S24_3LE`** — HAL-observed; the DAI accepts *only* this |
+| **Speaker (playback)** | `card0,device0` (`MultiMedia1_Playback`) | **RT5616** (PCM `00-23`), driving the ext amp | stereo expected; confirm at first playback |
+
+Tooling present on-device: **`tinymix`, `tinycap`**. **`tinyplay` and
+`tinypcminfo` are absent** — the speaker binding cannot be smoke-tested with
+stock tools; push a `tinyplay`/test binary, or verify via the binding itself
+(issue #5). `tinycap` **cannot capture the mic**: it can't request `S24_3LE`
+(3-byte-packed 24-bit), the only format `device22` accepts. A real capture
+needs the GoTinyAlsa binding requesting `S24_3LE` directly (issue #6).
+
+### The mic is a known-UNSOLVED bring-up problem — RE-SCOPE issue #6
+
+The MVP milestone (#6) is **not a straightforward binding**. Findings, from
+observing the working LineageOS HAL plus the `amazon-oss` kernel source:
+
+- **The HAL captures the mic on `card0,device22` directly** (the AIC3101
+  front-end, `amzn-mt-spi-pcm`), at **6ch / 16 kHz / `S24_3LE`**. Verified by
+  diffing `tinymix` around a live Recorder-app capture (`/proc/asound/.../
+  pcm22c/.../status` = `RUNNING`, `hw_params` = those values).
+- **No `tinymix` routing is involved** — the mixer diff during a live HAL
+  capture was **empty**. Opening the PCM powers the codec. My earlier attempts
+  on `device1` (internal PMIC ADC) and `device15` (I2S0AWB) were both dead ends
+  by design; both return digital zeros.
+- **Hardware:** 4 mics across two AIC3101 dies (`0x18`/`0x19`), differential
+  `DIF1` inputs, TDM. The 6 channels = 4 mics + 2 spare/reference slots.
+  `crown_defconfig`: `CONFIG_SND_SOC_4_MICS=y`.
+- **Gain is NOT the fix.** MICPGA is already maxed (`ADC_A/B MICPGA Volume Ctrl`
+  range `0→80`, sitting at `80`); digital volume `88/104`. XDA `crown` users who
+  maxed gain still get "faint static, no voice."
+- **Root cause:** stock uses Amazon's `amazon_wrapper` HAL + a smart-mic DSP
+  firmware (`i2s_to_spi_6ch_v183.bin`, RT551X) that actually clocks the AIC3101
+  TDM and does beamforming/AGC. LineageOS uses the generic MTK HAL, so the array
+  comes up under-initialised and near-silent. **The crown community has not
+  solved this.**
+
+**Consequence:** issue #6 becomes R&D — port the AIC3101 TDM + `mic-enable`
+pinctrl init (`tlv320aic3101_adc_cfg()` + `aic31xx_dai_apply_tdm_slot()` in
+`sound/soc/codecs/tlv320aic3101.c`), or drive the DSP firmware path. Speaker
+(#5) is unaffected and looks easy. Sequence #5 before #6; treat #6 as
+high-risk / possibly its own spike.
+
+Source: [`amazon-oss/android_kernel_amazon_mt8163`](https://github.com/amazon-oss/android_kernel_amazon_mt8163),
+[`amazon-oss/android_device_amazon_crown`](https://github.com/amazon-oss/android_device_amazon_crown) (branch `lineage-18.1`).
+
+### Speaker amp is already enabled
+`Ext_Speaker_Amp_Switch = On`, `Ext_Amp_Gain = 6dB` at rest — the playback amp
+path is live; the playback route needs less coaxing than capture.
+
+## Inputs (buttons, mute, switches)
+
+All live-confirmed with `getevent -lt` while pressing each control:
+
+| Control | Device | Event | Code | Behaviour |
+|---|---|---|---|---|
+| Volume up | `/dev/input/event6` (`gpio-keys`) | `EV_KEY` | `KEY_VOLUMEUP` | momentary |
+| Volume down | `/dev/input/event6` (`gpio-keys`) | `EV_KEY` | `KEY_VOLUMEDOWN` | momentary |
+| Mic / action button | `/dev/input/event0` (`gating`, amazon-specific) | `EV_KEY` | `KEY_POWER` | momentary DOWN/UP — firmware toggles mute in software |
+| Camera shutter | `/dev/input/event6` (`gpio-keys`) | `EV_SW` | `SW_CAMERA_LENS_COVER` | **latching** (1=closed, 0=open) |
+
+Other input nodes (not used by bindings, recorded to avoid opening the wrong
+one — resolve by NAME, never by number):
+
+- `event2` `fts_ts` — **touchscreen** (`BTN_TOUCH` + `ABS_MT_*`). The Dot's
+  CLAUDE.md warns event2 is the volume button on biscuit; here it is the screen.
+- `event3` `ACCDET` — headphone-jack accessory detect.
+- `event5` `m_alsps_input` — ambient-light + proximity sensor (an ALS exists,
+  like the Dot's `tsl2540` — resolve by name if ever used).
+- `event1` `mtk-kpd`, `event4` `hwmdata` — no useful keys.
+
+## Auto-start
+
+- **No Magisk / no `service.d`.** Root is the userdebug `adb root` path.
+- Init service dirs exist and are the autostart surface: `/system/etc/init/`
+  and `/vendor/etc/init/` (writable via `adb remount` on userdebug; there is a
+  leftover `/vendor/etc/init/amazon_init.rc`). LineageOS `addon.d`
+  (`50-lineage.sh`) survives OTA.
+- `/data/local/tmp` is shell-writable; `/data/local` is root-only.
+
+**Plan for issue #3:** drop an init `.rc` service into `/system/etc/init/` (or
+`/vendor/etc/init/`) that execs the pushed binary, after `adb remount`. No
+`su`/Magisk wrapper needed.
+
+## Discovery commands (reproduce this map)
+
+```sh
+adb root
+adb shell getprop ro.product.cpu.abi                 # armeabi-v7a
+adb shell getprop ro.build.version.sdk               # 30
+cat /proc/asound/cards ; cat /proc/asound/pcm        # card0 mtsndcard; PCM list
+adb shell tinymix                                     # mixer controls / routing
+adb shell 'tinycap /data/local/tmp/m.wav -D 0 -d 1 -c 2 -r 48000 -b 16 -T 3'
+adb shell getevent -lt                                # press each control to map it
+```
