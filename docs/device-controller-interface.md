@@ -274,11 +274,11 @@ bring the path up: the kernel probes both AIC3101 dies, imports the DSP
 firmware, and `android_device_amazon_crown` exposes a normal `Built-In Mic` at
 16 kHz mono — so the **ordinary record path (`plughw`/`AudioRecord`) captures**,
 and the MVP binding is *capture normally → stream → controller-side wake word*,
-not a codec bring-up. The open question is **level/SNR**: community reports range
-from "quiet/noisy" to "faint static." A concrete lead is that the
-`amzn,mic-downmix` kernel hack (average two mics into the channel the closed HAL
-keeps) is enabled for `checkers`/`cronos` but **not `crown`** — possibly why
-it's quiet, and possibly a one-line DTS fix. Full findings and links are in
+not a codec bring-up. The open question is **level/SNR** — but the upstream
+device tree already carries a crown-specific *"Boost built-in mic capture gain"*
+fix (2026-04-18), so a current build may already capture usably; the go/no-go is
+a one-off measurement on a recent build rather than a bring-up spike. Full
+findings and links are in
 [echo-show-8-hardware-map.md](echo-show-8-hardware-map.md#source-investigation-2026-08-24--the-mic-is-more-brought-up-than-it-looked).
 So **the `mic` capability for `crown` is provisional** pending a one-off
 on-hardware SNR measurement; the MVP milestone (boot → connect → HA → wake →

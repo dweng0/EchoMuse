@@ -100,11 +100,20 @@ Reading the LineageOS `crown` sources ([kernel](https://github.com/amazon-oss/an
   `AUDIO_CHANNEL_IN_MONO`/`STEREO`**. So the ordinary record path
   (`AudioRecord`, or ALSA `plughw`) *does* capture — no codec bring-up needed to
   get bytes.
-- **Concrete lead for the "quiet":** `amzn,mic-downmix` is set in
-  `checkers.dtsi` and `cronos.dtsi` — but **not in `crown.dtsi`**. If crown has
-  the same "HAL keeps one channel" behaviour, only one mic reaches it, which
-  reads as quiet. This may be a **one-line DTS flag / channel-handling fix**
-  rather than a bring-up spike. Confirm on hardware.
+- **The "quiet" was directly addressed upstream.** `android_device_amazon_crown`
+  commit `7fd09fa5` (2026-04-18) is literally **"crown: Boost built-in mic
+  capture gain"**, and the XDA changelog lists *"microphone volume was fixed"*
+  (alongside a Wi-Fi-disconnect fix). So a *current* LineageOS `crown` build
+  likely captures at a usable level already — test with the latest build before
+  assuming quiet.
+- **Retracted lead — `amzn,mic-downmix` is NOT crown's lever.** That hack
+  averages **ch0+ch1** and is enabled for `checkers`/`cronos`, whose mics sit on
+  those two channels. Crown has **4 mics across 2 dies**, a different layout, and
+  its maintainer fixed the level via the gain boost above, not downmix — so do
+  not treat "missing `amzn,mic-downmix` on `crown`" as the fix.
+- **Still unproven:** boosted gain ≠ guaranteed reliable *across-room* wake
+  (gain also lifts the noise floor), and the once-per-boot silent-capture bug's
+  status is unconfirmed. Both need the on-hardware SNR/wake measurement below.
 - **Known LineageOS bug:** capture works for the *first* recording after boot,
   then goes silent until `audioserver` restarts (reported on XDA). A satellite
   that opens capture once and *holds* it may sidestep this — or may trip it on
@@ -112,12 +121,12 @@ Reading the LineageOS `crown` sources ([kernel](https://github.com/amazon-oss/an
 
 **Re-scoped consequence for issue #6:** the MVP path is **capture normally
 (`plughw`/`AudioRecord`) → stream to the controller → controller-side wake
-word** — no on-device codec work required. The remaining go/no-go is a level/SNR
-**measurement**, and if it's quiet the first thing to try is the missing
-`amzn,mic-downmix` on `crown` (or grabbing more of the 4 mics), **not** a TDM
-bring-up from scratch. Speaker (#5) is unaffected and looks easy — sequence #5
-before #6, and treat #6 as "measure, then probably a DTS flag," downgraded from
-"high-risk spike."
+word** — no on-device codec work required. The upstream mic-gain fix means a
+current build may already be usable, so the go/no-go is simply a one-off level/SNR
+**measurement on a recent LineageOS `crown` build**. Speaker (#5) is unaffected
+and looks easy — sequence #5 before #6, and treat #6 as "measure on a current
+build," downgraded from "high-risk spike." A TDM bring-up from scratch is not on
+the table.
 
 **References**
 
