@@ -9,10 +9,10 @@ device (issue #1). Terms in **bold** are defined in [CONTEXT.md](../CONTEXT.md).
 physical shutter. LineageOS port codename **`crown`** (XDA unofficial).
 
 > **Codename note.** The LineageOS port and every device prop report **`crown`**
-> (`ro.product.device=crown`, `lineage_crown`). Our plan/ADR-0001 named the
-> build tag `hoya`; that was a guess. The build tag is ours to choose, but
-> **`crown` is what the platform actually calls itself** — reconcile before
-> issue #2 picks the tag name.
+> (`ro.product.device=crown`, `lineage_crown`). An earlier draft of the plan and
+> ADR-0001 named the build tag `hoya` — a guess, and the wrong one (`hoya` is
+> Amazon's codename for the Echo Show *5*). Reconciled: the build tag is
+> **`crown`** throughout, matching what the platform calls itself.
 
 ## Platform
 

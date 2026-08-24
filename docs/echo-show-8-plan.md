@@ -1,4 +1,4 @@
-# Plan — Echo Show 8 (Hoya) support
+# Plan — Echo Show 8 (Crown) support
 
 Working plan for adding Amazon Echo Show 8 (1st gen, LineageOS) support to
 EchoMuse. Terms in **bold** are defined in [CONTEXT.md](../CONTEXT.md). Key
@@ -10,7 +10,7 @@ The controller is model-agnostic — it enables features purely from the
 **Capability** list a device announces — so it needs almost no changes. The work
 is almost entirely a second set of **Bindings** in the device firmware: reuse the
 whole **Core** (wake word, beamformer, AEC, networking, server), write fresh
-hands for the Show's hardware, gated behind a new `hoya` build tag
+hands for the Show's hardware, gated behind a new `crown` build tag
 ([ADR-0001](adr/0001-binary-per-board.md)).
 
 ## Phases
@@ -23,7 +23,7 @@ Every later phase depends on this. (Lead the upstream issue with this — the
 owner may already have it.)
 
 ### Phase 1 — Toolchain + "it connects"
-New cross-compiler target for LineageOS's API level; `hoya` build tag. Reuse the
+New cross-compiler target for LineageOS's API level; `crown` build tag. Reuse the
 TLS/client stack unchanged. Success = the binary runs on the Show and appears as
 *pending* in the dashboard. No audio yet.
 

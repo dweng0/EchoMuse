@@ -1,8 +1,8 @@
 # One binary per board, selected by build tag
 
-Adding the Echo Show 8 (Hoya) means a second set of hardware bindings alongside
+Adding the Echo Show 8 (Crown) means a second set of hardware bindings alongside
 the Echo Dot 2nd Gen (Biscuit). We build a separate firmware binary per board,
-gated by a Go build tag (mirroring the existing `server` tag with a `hoya` tag),
+gated by a Go build tag (mirroring the existing `server` tag with a `crown` tag),
 rather than shipping one universal binary that detects the hardware at runtime.
 
 ## Why

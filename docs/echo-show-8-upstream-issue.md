@@ -16,7 +16,7 @@ shape early to get your feedback before writing much code.
 **Approach.** The controller is model-agnostic (capability-negotiated), so this
 is almost entirely a second set of device **bindings**. The plan is to reuse the
 whole board-agnostic core (wake word, beamformer, AEC, networking, server) and
-write fresh hardware bindings for the Show behind a new `hoya` build tag,
+write fresh hardware bindings for the Show behind a new `crown` build tag,
 mirroring the existing `server` tag — one binary per board, no runtime hardware
 detection.
 

@@ -9,7 +9,7 @@ AFK = an agent can do it unattended.
    input-device paths for buttons and mute, arch/API level, autostart mechanism.
    Output: a docs file. Unblocks every binding.
 
-2. **`hoya` build target + cross-compile toolchain** — HITL — blocked by: 1
+2. **`crown` build target + cross-compile toolchain** — HITL — blocked by: 1
    New build tag + compiler image for LineageOS's API level; produces an
    installable arm binary. Verified by it running on the device.
 

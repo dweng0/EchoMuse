@@ -1,6 +1,6 @@
-# Hoya owns the audio hardware exclusively (for now)
+# Crown owns the audio hardware exclusively (for now)
 
-On the Hoya (Echo Show 8 on LineageOS) EchoMuse seizes the microphone and
+On the Crown (Echo Show 8 on LineageOS) EchoMuse seizes the microphone and
 speaker hardware directly and exclusively — exactly as the Biscuit does — rather
 than routing through Android's audio system so other apps can share the sound
 devices. Sharing is deferred as a possible later phase.
@@ -34,7 +34,7 @@ make sound concurrently.
 
 ## Consequences
 
-- While EchoMuse runs, no other app on the Hoya can play audio or capture the
+- While EchoMuse runs, no other app on the Crown can play audio or capture the
   mic. This is deliberate: EchoMuse owns the audio, and is only a guest on the
   screen (the Borrowed Screen; see CONTEXT.md).
 - EchoMuse's own media playback and its self-ducking under a voice answer are
