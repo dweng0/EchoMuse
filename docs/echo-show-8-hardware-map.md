@@ -65,20 +65,70 @@ observing the working LineageOS HAL plus the `amazon-oss` kernel source:
 - **Gain is NOT the fix.** MICPGA is already maxed (`ADC_A/B MICPGA Volume Ctrl`
   range `0→80`, sitting at `80`); digital volume `88/104`. XDA `crown` users who
   maxed gain still get "faint static, no voice."
-- **Root cause:** stock uses Amazon's `amazon_wrapper` HAL + a smart-mic DSP
-  firmware (`i2s_to_spi_6ch_v183.bin`, RT551X) that actually clocks the AIC3101
-  TDM and does beamforming/AGC. LineageOS uses the generic MTK HAL, so the array
-  comes up under-initialised and near-silent. **The crown community has not
-  solved this.**
+- **Original (partly wrong) root-cause guess:** stock uses a smart-mic DSP
+  firmware (`i2s_to_spi_6ch_v183.bin`, RT551X) that clocks the AIC3101 TDM and
+  does beamforming/AGC, and LineageOS was assumed to fall back to a *generic MTK
+  HAL*, leaving the array near-silent. **The source investigation below
+  corrects this** — the LineageOS `crown` mic is substantially brought up, and
+  the likely cause of "quiet" is narrower and testable.
 
-**Consequence:** issue #6 becomes R&D — port the AIC3101 TDM + `mic-enable`
-pinctrl init (`tlv320aic3101_adc_cfg()` + `aic31xx_dai_apply_tdm_slot()` in
-`sound/soc/codecs/tlv320aic3101.c`), or drive the DSP firmware path. Speaker
-(#5) is unaffected and looks easy. Sequence #5 before #6; treat #6 as
-high-risk / possibly its own spike.
+### Source investigation (2026-08-24) — the mic is more brought-up than it looked
 
-Source: [`amazon-oss/android_kernel_amazon_mt8163`](https://github.com/amazon-oss/android_kernel_amazon_mt8163),
-[`amazon-oss/android_device_amazon_crown`](https://github.com/amazon-oss/android_device_amazon_crown) (branch `lineage-18.1`).
+Reading the LineageOS `crown` sources ([kernel](https://github.com/amazon-oss/android_kernel_amazon_mt8163),
+[device tree](https://github.com/amazon-oss/android_device_amazon_crown),
+[org](https://github.com/amazon-oss)) changes the picture:
+
+- **The HAL is Amazon's *closed blob*, not a generic MTK HAL.** Per the kernel
+  maintainer (commit `479f405a`): *"The proper fix would be in the HAL, but it
+  is a closed blob and we have neither its sources nor whatever modifications
+  Amazon applied on top."* So LineageOS ships Amazon's audio HAL, and the mic
+  path is already wired, not bypassed.
+- **The kernel already brings up the capture path.** Relevant commits in
+  `android_kernel_amazon_mt8163`
+  (`sound/soc/codecs/tlv320aic3101.c`,
+  `sound/soc/mediatek/mt_soc_audio_8163_amzn/amzn-spi-pcm/amzn-mt-spi-pcm.c`):
+  - `479f405a` — **"Mix both mics for mono capture"**: the HAL reads a single
+    channel of the AIC3101 SPI stream, so only one mic is captured; the kernel
+    averages ch0+ch1 as a hack, **enabled per-board via `amzn,mic-downmix`**.
+  - `61ff588b` — re-work probe of the secondary ADC (the second AIC3101 die).
+  - `c72fb388` — AIC3101 external reset control.
+  - `73cbfee1` — **imports the DSP firmware** (`i2s_to_spi_4ch_v208.bin`).
+  - `d9dad4db` — correct supported sample rates.
+- **`crown` exposes a normal mic to Android.** `android_device_amazon_crown`'s
+  `configs/audio_policy_configuration.xml` declares a `Built-In Mic`
+  (`AUDIO_DEVICE_IN_BUILTIN_MIC`) with a `primary input` at **16 kHz,
+  `AUDIO_CHANNEL_IN_MONO`/`STEREO`**. So the ordinary record path
+  (`AudioRecord`, or ALSA `plughw`) *does* capture — no codec bring-up needed to
+  get bytes.
+- **Concrete lead for the "quiet":** `amzn,mic-downmix` is set in
+  `checkers.dtsi` and `cronos.dtsi` — but **not in `crown.dtsi`**. If crown has
+  the same "HAL keeps one channel" behaviour, only one mic reaches it, which
+  reads as quiet. This may be a **one-line DTS flag / channel-handling fix**
+  rather than a bring-up spike. Confirm on hardware.
+- **Known LineageOS bug:** capture works for the *first* recording after boot,
+  then goes silent until `audioserver` restarts (reported on XDA). A satellite
+  that opens capture once and *holds* it may sidestep this — or may trip it on
+  reconnect. Testable.
+
+**Re-scoped consequence for issue #6:** the MVP path is **capture normally
+(`plughw`/`AudioRecord`) → stream to the controller → controller-side wake
+word** — no on-device codec work required. The remaining go/no-go is a level/SNR
+**measurement**, and if it's quiet the first thing to try is the missing
+`amzn,mic-downmix` on `crown` (or grabbing more of the 4 mics), **not** a TDM
+bring-up from scratch. Speaker (#5) is unaffected and looks easy — sequence #5
+before #6, and treat #6 as "measure, then probably a DTS flag," downgraded from
+"high-risk spike."
+
+**References**
+
+- XDA `crown` thread (canonical discussion, incl. mic reports):
+  <https://xdaforums.com/t/rom-unofficial-11-crown-lineageos-18-1-for-the-amazon-echo-show-8-2019.4766709/>
+- Kernel: [`amazon-oss/android_kernel_amazon_mt8163`](https://github.com/amazon-oss/android_kernel_amazon_mt8163)
+- Device tree: [`amazon-oss/android_device_amazon_crown`](https://github.com/amazon-oss/android_device_amazon_crown),
+  [`android_device_amazon_mt8163-common`](https://github.com/amazon-oss/android_device_amazon_mt8163-common) (branch `lineage-18.1`)
+- Vendor/HAL blobs: `android_vendor_amazon_crown`, `android_vendor_amazon_mt8163-common`
+- TI codec datasheet (AIC3101, up to 59.5 dB analog gain / AGC): <https://www.ti.com/product/TLV320AIC3101>
+- FCC teardown (internal photos — mic-array / board layout): <https://fccid.io/2ARO5-7879>
 
 ### Speaker amp is already enabled
 `Ext_Speaker_Amp_Switch = On`, `Ext_Amp_Gain = 6dB` at rest — the playback amp

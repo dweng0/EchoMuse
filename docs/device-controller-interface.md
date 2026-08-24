@@ -253,7 +253,7 @@ only what the *interface* commits to for MVP.
 | Capability | crown MVP | Note |
 |------------|-----------|------|
 | `speaker` | yes | `card0,device0` → RT5616; clean binding (issue #5) |
-| `mic` | **needs on-hardware confirmation** | Capture is unsolved R&D, not a simple binding — see below |
+| `mic` | **needs on-hardware confirmation** | Capture path exists (normal HAL/`plughw` 16 kHz mono); open question is level/SNR — see below |
 | `buttons` | yes | Resolved by name (`gpio-keys` vol, action button, camera shutter) |
 | `leds` / `led_anim` | **no** | No LED ring; a "voice turn" status overlay on the display is deferred past MVP and even then stays out of the user's way |
 | `audio_mix` | later | Not required for the MVP voice loop |
@@ -267,15 +267,23 @@ or it goes deaf to the next wake word. The **speaker** is grabbed for a turn
 (the reply plus any media the turn asked for) and released to idle — the Alexa
 model. The screen belongs entirely to the user's own software throughout.
 
-**The mic is the MVP blocker and is unconfirmed on hardware.** On-device
-discovery found capture returns digital zeros on the generic path: the mics sit
-on an external TLV320AIC3101 (TDM, `card0,device22`, 6ch/16kHz/`S24_3LE`) that
-stock brings up via Amazon's smart-mic DSP firmware, and the generic MediaTek
-HAL leaves it near-silent — a problem the `crown` community has not solved
-(issue #6). Until this is proven on real hardware, **the `mic` capability for
-`crown` is provisional**: the MVP milestone (boot → connect → HA → wake →
-Assist → spoken reply) depends on it. Recommend sequencing the speaker (#5)
-before the mic (#6) and treating #6 as a spike, not a binding.
+**The mic is the MVP blocker, but narrower than first thought.** The mics sit on
+external TLV320AIC3101 dies (TDM, `card0,device22`, 6ch/16 kHz/`S24_3LE`), and a
+raw capture returns digital zeros. But the LineageOS `crown` sources already
+bring the path up: the kernel probes both AIC3101 dies, imports the DSP
+firmware, and `android_device_amazon_crown` exposes a normal `Built-In Mic` at
+16 kHz mono — so the **ordinary record path (`plughw`/`AudioRecord`) captures**,
+and the MVP binding is *capture normally → stream → controller-side wake word*,
+not a codec bring-up. The open question is **level/SNR**: community reports range
+from "quiet/noisy" to "faint static." A concrete lead is that the
+`amzn,mic-downmix` kernel hack (average two mics into the channel the closed HAL
+keeps) is enabled for `checkers`/`cronos` but **not `crown`** — possibly why
+it's quiet, and possibly a one-line DTS fix. Full findings and links are in
+[echo-show-8-hardware-map.md](echo-show-8-hardware-map.md#source-investigation-2026-08-24--the-mic-is-more-brought-up-than-it-looked).
+So **the `mic` capability for `crown` is provisional** pending a one-off
+on-hardware SNR measurement; the MVP milestone (boot → connect → HA → wake →
+Assist → spoken reply) depends on it. Sequence speaker (#5) before mic (#6), and
+treat #6 as "measure, then likely a DTS flag" rather than a bring-up spike.
 
 ## Invariants (what the tests pin)
 
