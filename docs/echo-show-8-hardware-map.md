@@ -160,6 +160,42 @@ loud-room sanity check, not the wake-reliability test. The once-per-boot
 silent-capture bug (line 117 above) also remains unconfirmed either way; this
 run was a single 5s capture, not a reconnect-cycle test.
 
+### ch4/ch5 tested against checkers' AEC-reference pattern (2026-08-26) — doesn't transfer
+
+PR #36 (`docs/checkers-port.md`, Echo Show 5) found checkers' 4-channel capture
+is 2 real mics + a hardware AEC reference on the other 2: a sample-aligned
+loopback of the speaker output, delivered in the same SPI stream, measured at
+a fixed 40-sample delay, −13dB, 0.83 correlation to the mics. crown's ch4/ch5
+were logged as "quiet, ~15dB down" in the plain capture above — raising the
+same possibility, unconfirmed.
+
+Built `device/tools/aec_probe`: plays a click train through the speaker
+(`card0,device0`, `AudioSession`/`Pump`, matching production's playback path —
+the simpler one-shot `SendAudioStream` helper failed outright on this card)
+while capturing the mic array in the same process, so click and capture times
+share one clock. Cross-correlated each click's arrival on ch0 (real mic)
+against ch4.
+
+**Result: ch4 and ch5 are 99.1% exact digital zero**, byte-identical to each
+other in aggregate stats, with rare large-magnitude glitches uncorrelated with
+the click times. ch0–3 are live throughout (0% zero, continuous signal,
+clipping on some of the louder clicks — the test tone was loud enough to
+saturate the real mics, which is fine for detectability but means the RMS
+numbers above aren't clean level readings). This is a different shape than
+checkers' reference channels entirely: those are continuously live whenever
+anything plays; crown's ch4/ch5 are essentially silent with sporadic noise.
+
+**Conclusion: crown's ch4/ch5 are not a hardware AEC reference in the checkers
+sense.** They read closer to genuinely unused/idle TDM slots — matching the
+*original* pre-investigation "digital zeros" framing better than the
+"spare/reference slot" theory did. Worth noting the earlier plain capture
+(music playing loudly in the room) measured ch4/ch5 at −46/−47dBFS with 0.94
+self-correlation — that reading is very likely acoustic/electrical bleed from
+the loud program material onto idle channels, not a real signal path, given
+this controlled test shows them silent absent that bleed. Software AEC
+(existing speaker-tap reference, `aecEnabled`) remains the plan for crown;
+there's no hardware shortcut here.
+
 **References**
 
 - XDA `crown` thread (canonical discussion, incl. mic reports):
