@@ -307,6 +307,49 @@ today sits well inside every range, so it wasn't a lucky guess. The unnamed
 with the driver — cosmetic, since the format actually in use (`S16_LE`) is
 named correctly.
 
+### First end-to-end wake test (2026-08-26) — MVP loop proven, SNR still not
+
+Ran the full loop for the first time on real hardware: `crown` binary pushed
+via `adb`, connected to the controller, approved, added to Home Assistant as
+an ESPHome device (port 16003 — this needed a manual add, since it wasn't
+the device's first-ever connection when the HA integration looked for it).
+Wake word renamed to "Winston" for this test. Result: **wake → controller
+OWW detection → HA Assist pipeline → STT → TTS → spoken reply through
+crown's own speaker, repeatedly**, including a mid-reply barge-in that
+correctly cancelled and started an interrupting turn. This is the MVP
+acceptance bar from `docs/echo-show-8-plan.md` Phase 2, met.
+
+Five manual trials, saying "Winston, what is the time" once each, scores
+pulled from the controller log (threshold 0.500):
+
+| Attempt | Score |
+|---|---|
+| 1m | 0.509 |
+| 2m | 0.709 |
+| 4m | 0.769 |
+| 4m, facing away from the device | 0.539 |
+| 5m, outside the room | 0.695 |
+
+**All five triggered a detection — no clean miss in this sample at all**,
+including the 5m/outside-room attempt the tester expected to fail. Two
+things keep this from being a real SNR result:
+
+- **No monotonic falloff with distance** — 4m scored higher than 1m, and 5m
+  outside the room scored higher than facing-away at 4m. Five trials is too
+  few to trust a curve; this is noise in the sample, not a real trend.
+- **The close/direct attempts were the marginal ones** — 1m and "facing away"
+  scored 0.509 and 0.539, barely above threshold, while farther/harder
+  attempts scored comfortably higher (0.7+). That is the actual finding:
+  margin above threshold is thin even in the easy cases, not just the hard
+  ones, and this batch never saw where it actually breaks.
+
+**Conclusion: the wake-reliability go/no-go from the "on-hardware capture"
+section above is still open.** Five hits with some low margins is "worked
+five times in one quiet room," not "reliable across-room." A real answer
+needs many more trials, varied ambient noise, and at least one genuine miss
+to show where the threshold/gain/model combination actually fails — none of
+which this session produced.
+
 ## Inputs (buttons, mute, switches)
 
 All live-confirmed with `getevent -lt` while pressing each control:
