@@ -41,18 +41,5 @@
 
         <service android:name=".ServerService" android:exported="false" />
 
-        <!--
-          Throwaway diagnostic, not part of the shipped design — see
-          docs/echo-show-8-audiotrack-design.md ("Q2"). Answers whether
-          AudioTrack's low-latency path is actually granted on this
-          SoC/ROM before any real socket/service code gets written.
-          Exported so `adb shell am broadcast` (shell uid) can trigger it.
-        -->
-        <receiver android:name=".AudioProbeReceiver" android:exported="true">
-            <intent-filter>
-                <action android:name="com.echomuse.crownlauncher.PROBE_AUDIO" />
-            </intent-filter>
-        </receiver>
-
     </application>
 </manifest>
