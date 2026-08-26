@@ -65,32 +65,31 @@ platform.
 
 ## What's NOT done — the actual next steps
 
-1. **Cross-app ducking doesn't happen, and this is expected, not a
-   regression.** `duckDb`/`Mixer.duckTarget` only ever ducked crown's own
-   voice-vs-music planes against each other (internal to one process).
-   Now that the browser's audio is a genuinely separate `AudioTrack`
-   client mixed by `AudioFlinger`, our mixer has no reach over it — never
-   did. Real fix: request transient `AudioFocus` per turn in
-   `PlaybackServer.java` (`AudioManager.requestAudioFocus`,
-   `AUDIOFOCUS_GAIN_TRANSIENT` or the ducking variant) around
-   `track.play()`/`track.stop()`; other apps duck/pause automatically
-   while focus is held, no custom mixing logic needed. Not started.
-2. **`AudioProbeReceiver`** (the throwaway diagnostic from step 1 above)
-   is still present in `crown_launcher/` and still wired into the
-   manifest. Harmless but not part of the shipped design — remove or
-   leave as a standing diagnostic, contributor's call.
+1. ~~Cross-app ducking~~ — **done**, `15c1704`. `PlaybackServer.java`
+   requests `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` around each connection's
+   `track.play()`/`track.stop()`; other apps duck automatically while
+   focus is held, matching the pre-fix ducking behaviour from the
+   outside. Not yet validated live with a second app actually playing
+   during a turn — build is clean, but nobody has watched it duck on
+   hardware yet.
+2. ~~`AudioProbeReceiver`~~ — **removed**, `6079f3f`. Findings kept as a
+   comment in `PlaybackServer.buildTrack()`; the receiver and its
+   exported `PROBE_AUDIO` broadcast are gone from the manifest.
 3. **Everything from the *previous* handoff doc that was never about the
    freeze itself is still open**: the ueventd `/dev/snd`+`/dev/input`
    permission patch is still a manual, undocumented step on this one test
    unit (not in `provision_crown.sh`); `device/.android-sdk/` and
    `crown_launcher/build/` are gitignored now but the SDK itself is still
-   a manual local install; nothing on this branch has been opened as a PR
-   against `main` yet.
+   a manual local install. `provision_crown.sh` itself was rewritten to
+   install `crown_launcher.apk` instead of the dead raw-init `.rc` path
+   and committed this session (`88a99a3`) — that part of the previous
+   handoff's open list is closed.
 4. **Longer-horizon, not urgent**: the 10-minute soak is solid evidence
    but is still short next to "ran for days" — if this ships to a real
    fleet rather than staying a one-device experiment, worth a much longer
    unattended run at some point, ideally with the device also doing
    ordinary tablet things (browsing, notifications) rather than just idle.
+5. **New**: branch not yet opened as a PR against `main`. See below.
 
 ## Live device state as of writing this
 
