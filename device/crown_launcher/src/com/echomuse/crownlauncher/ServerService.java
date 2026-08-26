@@ -41,7 +41,7 @@ public class ServerService extends Service {
         // Start the playback socket server before the daemon, so the
         // socket file exists by the time the daemon's first connect
         // attempt happens — see docs/echo-show-8-audiotrack-design.md.
-        playbackServer = new PlaybackServer();
+        playbackServer = new PlaybackServer(this);
         playbackThread = new Thread(playbackServer, "echomuse-playback");
         playbackThread.start();
         try {

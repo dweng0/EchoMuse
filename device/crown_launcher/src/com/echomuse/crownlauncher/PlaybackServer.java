@@ -1,7 +1,10 @@
 package com.echomuse.crownlauncher;
 
+import android.content.Context;
 import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
 import android.media.AudioFormat;
+import android.media.AudioManager;
 import android.media.AudioTrack;
 import android.net.LocalServerSocket;
 import android.net.LocalSocket;
@@ -42,6 +45,13 @@ import java.io.InputStream;
  * the AudioTrack is released and rebuilt fresh on the next connection —
  * deliberately no retry/health-check machinery beyond that, same "minimal,
  * no supervisor" reasoning as ServerService itself.
+ *
+ * Cross-app ducking rides transient AudioFocus, not our own mixer: once
+ * this became a real AudioTrack client of AudioFlinger (rather than an
+ * exclusive /dev/snd hold), other apps' streams are outside our mixer's
+ * reach entirely — requesting focus per turn is what makes them duck/pause
+ * automatically instead. See "What's NOT done" #1 in
+ * docs/echo-show-8-audiotrack-handoff.md.
  */
 class PlaybackServer implements Runnable {
     private static final String TAG = "EchoMusePlayback";
@@ -55,8 +65,14 @@ class PlaybackServer implements Runnable {
     private static final int CHANNEL_MASK = AudioFormat.CHANNEL_OUT_STEREO;
     private static final int ENCODING = AudioFormat.ENCODING_PCM_16BIT;
 
+    private final AudioManager audioManager;
+
     private volatile boolean running = true;
     private LocalServerSocket serverSocket;
+
+    PlaybackServer(Context context) {
+        audioManager = context.getSystemService(AudioManager.class);
+    }
 
     void stop() {
         running = false;
@@ -100,6 +116,7 @@ class PlaybackServer implements Runnable {
 
     private void handleConnection(LocalSocket client) throws IOException {
         AudioTrack track = buildTrack();
+        AudioFocusRequest focusRequest = requestDuckFocus();
         track.play();
         try {
             InputStream in = client.getInputStream();
@@ -118,7 +135,31 @@ class PlaybackServer implements Runnable {
         } finally {
             track.stop();
             track.release();
+            if (focusRequest != null) audioManager.abandonAudioFocusRequest(focusRequest);
         }
+    }
+
+    // AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK, not the exclusive TRANSIENT: a
+    // wake response is short and other apps (browser audio, etc.) should
+    // duck under it, not stop outright, matching the pre-fix behaviour
+    // where our own mixer only ever ducked its own planes. Best-effort —
+    // a denied request just means no ducking this turn, not a broken turn,
+    // so the return value isn't checked beyond logging it.
+    private AudioFocusRequest requestDuckFocus() {
+        if (audioManager == null) return null;
+        AudioAttributes attrs = new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build();
+        AudioFocusRequest request = new AudioFocusRequest.Builder(
+                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                .setAudioAttributes(attrs)
+                .build();
+        int result = audioManager.requestAudioFocus(request);
+        if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            Log.w(TAG, "audio focus request denied (" + result + "), no ducking this turn");
+        }
+        return request;
     }
 
     private static void readFully(InputStream in, byte[] buf, int len) throws IOException {
