@@ -657,6 +657,104 @@ function LedRing({ state, size = 120 }) {
   );
 }
 
+// A screen-bodied device (crown / Echo Show 8) in place of LedRing's puck.
+// Same call signature and bounding box (size x size) so it drops into
+// either call site unchanged — state -> colour works identically, but
+// crown has no LED ring to animate an arc around, and no physical
+// indicator of any kind (device/internal/bindings/led/led_crown.go is a
+// deliberate no-op — "leds" stays an advertised capability only because
+// the controller's wake-cue hint needs *a* target, not because anything
+// lights up). This ribbon is purely a dashboard-side status readout, same
+// job as any other status chrome, not a stand-in for hardware that exists.
+// A real on-screen status surface is deferred past MVP.
+function ScreenRing({ state, size = 120 }) {
+  const stateKey = state?.key || 'idle';
+  const stateColor = state?.dot || '#aaaaaa';
+  const isPending = stateKey === 'pending';
+  const isOffline = stateKey === 'offline';
+
+  const ledColor = isPending ? '#c8c8c8'
+                 : isOffline ? '#d4703a'
+                 : stateKey === 'muted' ? '#c04040'
+                 : stateKey === 'speaking' ? '#4080d0'
+                 : stateKey === 'listening' ? '#40906a'
+                 : stateKey === 'thinking' ? '#a08020'
+                 : '#3a4a30';
+  const shouldPulse = isPending || isOffline;
+
+  // Body fills the square footprint with a little margin, screen-aspect
+  // (16:10, close to the real 8" panel) rather than square — landscape,
+  // same orientation the device sits in.
+  const m = size * 0.06;
+  const bodyW = size - m * 2, bodyH = bodyW * 0.64;
+  const bodyX = m, bodyY = (size - bodyH) / 2;
+  const bezel = size * 0.045;
+  const screenX = bodyX + bezel, screenY = bodyY + bezel;
+  const screenW = bodyW - bezel * 2, screenH = bodyH - bezel * 2 - size * 0.09;
+  const ribbonH = size * 0.06;
+  const ribbonX = screenX, ribbonY = screenY + screenH + bezel * 0.5;
+  const ribbonW = screenW;
+  const rBody = size * 0.055, rScreen = size * 0.02, rRibbon = ribbonH / 2;
+
+  return (
+    <svg width={size} height={size} style={{ display: 'block', flexShrink: 0 }}>
+      <defs>
+        <radialGradient id={`shell-scr-${size}`} cx="38%" cy="28%" r="80%">
+          <stop offset="0%" stopColor="#505050"/>
+          <stop offset="55%" stopColor="#2c2c2c"/>
+          <stop offset="100%" stopColor="#181818"/>
+        </radialGradient>
+        <radialGradient id={`inner-scr-${size}`} cx="42%" cy="30%" r="75%">
+          <stop offset="0%" stopColor="#383838"/>
+          <stop offset="100%" stopColor="#1a1a1a"/>
+        </radialGradient>
+        <filter id={`glow-scr-${size}`} x="-60%" y="-60%" width="220%" height="220%">
+          <feGaussianBlur stdDeviation="2.5" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      {/* body / bezel */}
+      <rect x={bodyX} y={bodyY} width={bodyW} height={bodyH} rx={rBody}
+        fill={`url(#shell-scr-${size})`}/>
+      <rect x={bodyX} y={bodyY} width={bodyW} height={bodyH} rx={rBody}
+        fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="1.2"/>
+      {/* screen face */}
+      <rect x={screenX} y={screenY} width={screenW} height={screenH} rx={rScreen}
+        fill={`url(#inner-scr-${size})`}/>
+      <rect x={screenX} y={screenY} width={screenW} height={screenH} rx={rScreen}
+        fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="0.8"/>
+      <rect x={screenX + screenW*0.06} y={screenY + screenH*0.08}
+        width={screenW*0.5} height={screenH*0.28} rx={rScreen*0.8}
+        fill="rgba(255,255,255,0.05)"/>
+      {/* colour ribbon — the state indicator, in place of the ring's arc */}
+      <rect x={ribbonX} y={ribbonY} width={ribbonW} height={ribbonH} rx={rRibbon}
+        fill="#0b0b0b"/>
+      <rect x={ribbonX} y={ribbonY} width={ribbonW} height={ribbonH} rx={rRibbon}
+        fill={ledColor}
+        filter={stateKey !== 'idle' ? `url(#glow-scr-${size})` : undefined}
+        style={{
+          transition: 'fill 0.4s',
+          ...(shouldPulse ? { animation: 'ledpulse 1.8s ease-in-out infinite' } : {}),
+        }}/>
+      <circle cx={ribbonX + ribbonH/2} cy={ribbonY + ribbonH/2} r={ribbonH*0.22}
+        fill={stateColor} style={{ transition: 'fill 0.4s' }}/>
+    </svg>
+  );
+}
+
+// Picks the device-shaped icon by reported board model — a screen body for
+// crown (Echo Show 8), the puck ring for everything else (biscuit and any
+// future board that doesn't say otherwise). device.model is live-reported
+// and persisted (em_db v20) so an offline device still gets the right
+// shape; an unknown/never-connected device falls back to the ring, same as
+// today.
+function DeviceIcon({ device, state, size }) {
+  const isScreen = /echo show/i.test(device?.model || '');
+  return isScreen
+    ? <ScreenRing state={state} size={size}/>
+    : <LedRing state={state} size={size}/>;
+}
+
 // ─── Shell terminal ───────────────────────────────────────────────────────────
 
 // Real terminal (xterm.js) over the device shell WebSocket.
@@ -1533,7 +1631,7 @@ function Detail({ device, token, onClose, onApprove, isAdmin, globalConfig, onDe
         {/* Header */}
         <div className="em-modal-head" style={{ background: 'linear-gradient(180deg,var(--card),var(--bg))', borderBottom: '1px solid var(--border-hard)', padding: '20px 24px 0', boxShadow: '0 1px 0 var(--sheen) inset' }}>
           <div className="em-modal-headrow" style={{ display: 'flex', alignItems: 'center', gap: 20, marginBottom: 16 }}>
-            <LedRing state={state} size={72}/>
+            <DeviceIcon device={device} state={state} size={72}/>
             <div style={{ flex: 1, minWidth: 0 }}>
               {renaming ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -2244,7 +2342,7 @@ function Card({ device, onClick }) {
         </div>
       </div>
       <div style={{ display: 'flex', justifyContent: 'center', padding: '20px 0 12px' }}>
-        <LedRing state={state} size={120}/>
+        <DeviceIcon device={device} state={state} size={120}/>
       </div>
       <div style={{ padding: '0 16px 16px' }}>
         <div className="em-inset" style={{ '--em-inset-radius':'6px', '--em-inset-pad':'7px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

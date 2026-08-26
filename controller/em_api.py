@@ -4631,6 +4631,12 @@ def _merge_device(row) -> dict:
         "ip":                 row["ip"],
         "firmware_ver":       row["firmware_ver"],
         "firmware_previous":  row["firmware_previous"],
+        # Human-readable board label ("Echo Show 8 Gen 1 (crown)" etc, see
+        # em_db's v20 migration) — live value while connected (freshest),
+        # falling back to the persisted one so an offline device still
+        # renders the right icon shape instead of the default.
+        "model":              ((getattr(live, "model", None) if live else None) or row["model"])
+                              if "model" in row.keys() else None,
         "first_seen":         row["first_seen"],
         "last_seen":          row["last_seen"],
         "config":             json.loads(row["config"] or "{}"),

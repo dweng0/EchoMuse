@@ -2609,6 +2609,7 @@ async def handle_control(ws: WebSocketServerProtocol, secure: bool = False):
         ip           = msg.get("ip", str(remote[0]))
         version      = msg.get("version")
         capabilities = msg.get("capabilities", [])
+        model        = msg.get("model")
 
         loop         = asyncio.get_event_loop()
         approval_mode = db.get_config("device_approval", DEVICE_APPROVAL)
@@ -2647,7 +2648,7 @@ async def handle_control(ws: WebSocketServerProtocol, secure: bool = False):
 
         if not row["approved"]:
             await loop.run_in_executor(
-                None, db.upsert_device_seen, device_id, ip, version
+                None, db.upsert_device_seen, device_id, ip, version, model
             )
             await ws.send(json.dumps({"type": "pending"}))
             log.info(
@@ -2658,7 +2659,7 @@ async def handle_control(ws: WebSocketServerProtocol, secure: bool = False):
             return
 
         await loop.run_in_executor(
-            None, db.upsert_device_seen, device_id, ip, version
+            None, db.upsert_device_seen, device_id, ip, version, model
         )
 
         device = Device(device_id, ip, capabilities, ws)
