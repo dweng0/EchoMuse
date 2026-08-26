@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Minimal APK launcher for crown (Echo Show 8, Android 11 / API 30).
+
+  Exists only because raw init.rc can't exec /data/local/bin/server on a
+  non-Magisk device — see docs/echo-show-8-hardware-map.md and the commit
+  "docs: crown can't autostart via raw init.rc — needs an APK launcher"
+  (2026-08-26). Ordinary app execution from /data has none of that
+  restriction, so this app's only job is: on boot, exec the real binary as
+  a foreground service and get out of the way. No UI, no resources.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.echomuse.crownlauncher"
+    android:versionCode="1"
+    android:versionName="1.0">
+
+    <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="30" />
+
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!--
+      Without this, the app's uid never joins gid "inet" (AID_INET, 3003) and
+      Android's netfilter owner-match rules block ALL socket() calls for that
+      uid — not just from the app itself but from the server binary exec'd as
+      its child, since it inherits the same uid. Silent failure, not a clean
+      EACCES: mDNS queries just never leave the interface (confirmed via
+      tcpdump — zero outbound packets from the device's IP on port 5353 over
+      a full browse cycle) and a WebSocket dial would have failed the same
+      way. Found 2026-08-26 chasing "mDNS never finds the controller" after
+      the /dev/snd and /dev/input node-permission fixes were already in.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application android:label="EchoMuse Crown Launcher" android:allowBackup="false">
+
+        <receiver android:name=".BootReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <service android:name=".ServerService" android:exported="false" />
+
+        <!--
+          Throwaway diagnostic, not part of the shipped design — see
+          docs/echo-show-8-audiotrack-design.md ("Q2"). Answers whether
+          AudioTrack's low-latency path is actually granted on this
+          SoC/ROM before any real socket/service code gets written.
+          Exported so `adb shell am broadcast` (shell uid) can trigger it.
+        -->
+        <receiver android:name=".AudioProbeReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="com.echomuse.crownlauncher.PROBE_AUDIO" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+</manifest>

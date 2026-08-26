@@ -20,3 +20,9 @@ controller/models/
 *.db
 *.db-wal
 *.db-shm
+
+# device/.android-sdk/ — downloaded cmdline-tools + platform + build-tools
+# for crown_launcher/build.sh (~150MB+), not source. See device/CLAUDE.md.
+device/.android-sdk/
+device/crown_launcher/build/
+device/crown_launcher/debug.keystore
