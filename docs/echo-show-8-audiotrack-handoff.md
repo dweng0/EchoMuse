@@ -65,13 +65,16 @@ platform.
 
 ## What's NOT done — the actual next steps
 
-1. ~~Cross-app ducking~~ — **done**, `15c1704`. `PlaybackServer.java`
-   requests `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` around each connection's
-   `track.play()`/`track.stop()`; other apps duck automatically while
-   focus is held, matching the pre-fix ducking behaviour from the
-   outside. Not yet validated live with a second app actually playing
-   during a turn — build is clean, but nobody has watched it duck on
-   hardware yet.
+1. ~~Cross-app ducking~~ — **done and validated live**, `15c1704` +
+   `bb80677`. First cut (`15c1704`) requested `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK`
+   around the socket connection's lifetime — wrong scope, because that
+   connection lives for the daemon's whole run (`silenceLoop` never closes
+   it; idle is real continuously-written silence). Measured live: focus
+   requested once at connect, never abandoned — permanent duck from boot,
+   not per turn. `bb80677` fixed it by keying focus to silent-vs-non-silent
+   frames (all-zero bytes) with a 6-frame (~200ms) debounce. Validated live
+   with two real turns while browser audio played: browser ducked and
+   un-ducked exactly once per turn in `dumpsys audio`'s playback log.
 2. ~~`AudioProbeReceiver`~~ — **removed**, `6079f3f`. Findings kept as a
    comment in `PlaybackServer.buildTrack()`; the receiver and its
    exported `PROBE_AUDIO` broadcast are gone from the manifest.
