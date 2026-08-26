@@ -5,6 +5,7 @@ package mic
 import (
 	"context"
 	"errors"
+	"io"
 	"log"
 	"sync"
 	"time"
@@ -110,13 +111,22 @@ func (m *PcmMicrophone) readLoop() {
 	)
 
 	for {
-		n, err := m.pcm.Read(buf)
+		// io.ReadFull, not a single Read: alsa.PCM.Read is a thin wrapper
+		// over the read(2) syscall and can legitimately return fewer bytes
+		// than asked for one buffer this size (~160ms/2560 frames) without
+		// erroring — a single Read() call took the short read as-is here
+		// first, and downstream code (AEC in particular, which requires
+		// exact multiples of its 1024-byte speex frame) got a batch that
+		// didn't line up, bypassed itself, and something about the
+		// resulting misalignment destabilised the whole mic goroutine
+		// (measured on real hardware 2026-08-26: repeated unexplained
+		// stream stop/restart cycles disappeared once this loop was
+		// fixed). n==0 with no error is EPIPE recovery re-arming the
+		// stream (alsa.PCM.Read's own doc) — ReadFull just calls it again.
+		n, err := io.ReadFull(m.pcm, buf)
 		if err != nil {
 			log.Printf("mic: ALSA read error: %v", err)
 			break
-		}
-		if n == 0 {
-			continue // EPIPE recovery in alsa.PCM.Read already re-armed the stream
 		}
 
 		now := time.Now()
