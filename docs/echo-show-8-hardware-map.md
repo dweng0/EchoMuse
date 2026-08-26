@@ -238,12 +238,34 @@ Full dump saved; the controls that matter for a profile:
 | Mic analog gain (MICPGA) | `ADC_A MICPGA Volume Ctrl`, `ADC_B MICPGA Volume Ctrl` | `80 80` each |
 | Mic mute | `ADC_A Left Mute`, `ADC_A Right Mute`, `ADC_B Left Mute`, `ADC_B Right Mute` | all `Off` |
 
-Not yet tested: whether these mic-mute controls are what our own mute button
-should drive, or purely descriptive of chip state the HAL also touches (same
-ambiguity CLAUDE.md documents for biscuit's `Ext_Speaker_Amp_Switch` not
-describing where audio physically goes) — needs the same before/during-capture
-mixer-diff method used to establish "no tinymix routing is involved" in mic
-capture above, repeated for the mute button specifically.
+### Mic mute controls verified live (2026-08-26) — genuinely load-bearing
+
+The open question was whether the four `ADC_*/Left|Right Mute` controls
+actually silence capture, or are purely descriptive chip state the HAL also
+touches without them doing anything themselves (the same ambiguity CLAUDE.md
+documents for biscuit's `Ext_Speaker_Amp_Switch` not describing where audio
+physically goes).
+
+Tested directly rather than inferred: ran `aec_probe` (15s, continuous click
+train + capture) in the background while independently driving the four mute
+controls to `On` at t=5s and back to `Off` at t=10s from a second, timed
+`adb shell` command (both launched together; the device's own `sleep`
+provides the timing, not the harness). Note the controls are `BOOL` type,
+not `ENUM` — `tinymix <ctl> 1`/`0`, not `On`/`Off` (that fails with "only
+enum types can be set with strings").
+
+**Result: ch0's captured peak drops to exact 0 for the whole muted window**
+(clicks at t=5.0s through 9.5s all read `0`, `-inf dBFS`) **and recovers to
+normal signal immediately after unmute** (t=10.5s onward). The ~0.5s lead
+on both transitions is adb round-trip latency, not ambiguity — the effect
+is unmistakable, not a level dip.
+
+**Confirmed: these are the real mute controls, not descriptive state.**
+`ADC_A Left Mute`, `ADC_A Right Mute`, `ADC_B Left Mute`, `ADC_B Right Mute`
+— all four, one pair per die — are what the device's own mute button/mic-mute
+binding should drive. This closes the last open item from the mixer-control
+discovery pass; card/device numbers, gain, volume and mute controls are now
+all measured, not guessed.
 
 ### HW_REFINE, driver-asked not HAL-observed (2026-08-26)
 
