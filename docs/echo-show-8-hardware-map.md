@@ -207,9 +207,43 @@ there's no hardware shortcut here.
 - TI codec datasheet (AIC3101, up to 59.5 dB analog gain / AGC): <https://www.ti.com/product/TLV320AIC3101>
 - FCC teardown (internal photos — mic-array / board layout): <https://fccid.io/2ARO5-7879>
 
-### Speaker amp is already enabled
-`Ext_Speaker_Amp_Switch = On`, `Ext_Amp_Gain = 6dB` at rest — the playback amp
-path is live; the playback route needs less coaxing than capture.
+### `Ext_Speaker_Amp_Switch` is inverted — same trap as checkers (2026-08-26)
+
+**Correction to an earlier assumption below.** `Ext_Speaker_Amp_Switch = On` at
+boot was read as "the amp path is already live" — untested, an inference from
+the default value alone. Live-tested now with `aec_probe`'s click train:
+**`On` produces no audible output; `Off` does.** Confirmed by ear, not
+inferred. This is the *exact* control name and the *exact* inversion
+`docs/checkers-port.md` (PR #36) documented for the Echo Show 5 — expected,
+since crown and checkers share the same RT5616 speaker codec, unlike
+biscuit's TLV320AIC32x4 where `On` means enabled. Toggled with:
+```
+adb shell tinymix 5 Off
+```
+This must land in `Profile.AmpOn`/`AmpOff` (or the equivalent init sequence)
+when crown's bindings are built for real — shipping the boot default silences
+the device with nothing logged, the same shape of bug checkers' README warns
+about.
+
+### Mixer control names (2026-08-26, `tinymix` dump, `adb shell tinymix`)
+
+Full dump saved; the controls that matter for a profile:
+
+| Purpose | Control name(s) | At rest |
+|---|---|---|
+| Speaker amp enable | `Ext_Speaker_Amp_Switch` | `On` (= **silent** — see above) |
+| Speaker amp gain | `Ext_Amp_Gain` | `6dB` |
+| Speaker playback volume | `DAC1 Playback Volume` | `173 173` — same control name checkers uses (shared RT5616) |
+| Mic digital volume | `ADC_A Digital Volume Control`, `ADC_B Digital Volume Control` | `88 88` each — matches biscuit's per-chip naming, A/B not A–D |
+| Mic analog gain (MICPGA) | `ADC_A MICPGA Volume Ctrl`, `ADC_B MICPGA Volume Ctrl` | `80 80` each |
+| Mic mute | `ADC_A Left Mute`, `ADC_A Right Mute`, `ADC_B Left Mute`, `ADC_B Right Mute` | all `Off` |
+
+Not yet tested: whether these mic-mute controls are what our own mute button
+should drive, or purely descriptive of chip state the HAL also touches (same
+ambiguity CLAUDE.md documents for biscuit's `Ext_Speaker_Amp_Switch` not
+describing where audio physically goes) — needs the same before/during-capture
+mixer-diff method used to establish "no tinymix routing is involved" in mic
+capture above, repeated for the mute button specifically.
 
 ## Inputs (buttons, mute, switches)
 
