@@ -19,7 +19,15 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-CONTROL_GO = ROOT / "device" / "internal" / "client" / "control.go"
+# capabilities() moved out of control.go and into a per-board file
+# (2026-08-26, crown support): capabilities_default.go for every build that
+# isn't explicitly another board (`!crown` — same fallback-to-biscuit
+# philosophy as internal/bindings/led), capabilities_crown.go for `-tags
+# crown`. This file's job is the full vocabulary of capability strings any
+# build can send, which is still exactly biscuit's list — crown's is a
+# strict subset (mic/speaker/leds/buttons, all already in biscuit's set),
+# so the default file remains the right ground truth here.
+CONTROL_GO = ROOT / "device" / "internal" / "client" / "capabilities_default.go"
 CONTROLLER = ROOT / "controller" / "em_controller.py"
 API = ROOT / "controller" / "em_api.py"
 ESPHOME = ROOT / "controller" / "em_esphome.py"
@@ -38,7 +46,7 @@ def device_capabilities() -> list[str]:
     """
     src = CONTROL_GO.read_text()
     m = re.search(r'func capabilities\(\) \[\]string \{(.*?)\n\}', src, re.S)
-    assert m, "could not find func capabilities() in control.go"
+    assert m, f"could not find func capabilities() in {CONTROL_GO.name}"
     return re.findall(r'"([a-z_]+)"', m.group(1))
 
 
