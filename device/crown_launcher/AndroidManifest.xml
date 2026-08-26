@@ -7,7 +7,9 @@
   "docs: crown can't autostart via raw init.rc — needs an APK launcher"
   (2026-08-26). Ordinary app execution from /data has none of that
   restriction, so this app's only job is: on boot, exec the real binary as
-  a foreground service and get out of the way. No UI, no resources.
+  a foreground service and get out of the way. No resources (no res/,
+  everything programmatic) — StatusOverlay is the one bit of UI, a thin
+  status strip drawn over whatever else is on screen.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.echomuse.crownlauncher"
@@ -30,6 +32,23 @@
       the /dev/snd and /dev/input node-permission fixes were already in.
     -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+      For StatusOverlay's TYPE_APPLICATION_OVERLAY strip — the crown answer
+      to biscuit's LED ring. This is a special permission Android will not
+      grant via a runtime prompt at all pre-API23-style; it needs either the
+      user visiting Settings, or `adb shell appops set <pkg>
+      SYSTEM_ALERT_WINDOW allow` from a shell that already has it (ours does
+      — the same root/shell access provision_crown.sh already uses for
+      everything else). provision_crown.sh grants it right after install so
+      there is no manual step.
+    -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- StatusOverlay wakes the screen for the duration of a turn, so a
+         wake word actually shows the status bar rather than lighting up
+         nothing behind a locked/sleeping screen. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application android:label="EchoMuse Crown Launcher" android:allowBackup="false">
 

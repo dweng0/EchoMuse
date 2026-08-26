@@ -29,6 +29,8 @@ public class ServerService extends Service {
     private Process proc;
     private PlaybackServer playbackServer;
     private Thread playbackThread;
+    private StatusOverlay statusOverlay;
+    private Thread statusThread;
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -44,6 +46,11 @@ public class ServerService extends Service {
         playbackServer = new PlaybackServer(this);
         playbackThread = new Thread(playbackServer, "echomuse-playback");
         playbackThread.start();
+        // Same reasoning as the playback socket: bind before the daemon
+        // starts so its first connect attempt lands on a listening socket.
+        statusOverlay = new StatusOverlay(this);
+        statusThread = new Thread(statusOverlay, "echomuse-status");
+        statusThread.start();
         try {
             proc = new ProcessBuilder(BINARY)
                     .redirectErrorStream(true)
@@ -63,6 +70,9 @@ public class ServerService extends Service {
         }
         if (playbackServer != null) {
             playbackServer.stop();
+        }
+        if (statusOverlay != null) {
+            statusOverlay.stop();
         }
         super.onDestroy();
     }

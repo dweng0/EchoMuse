@@ -105,6 +105,17 @@ echo "-- installing crown_launcher.apk (autostart)"
 adb install -r -g "$APK" >/dev/null
 echo "   done"
 
+echo "-- granting SYSTEM_ALERT_WINDOW (status strip overlay)"
+# SYSTEM_ALERT_WINDOW is a special permission — Android will not grant it
+# via a runtime prompt, only a manual Settings visit or an appops call from
+# a shell that already holds it. Ours does (same root/shell access every
+# other step here uses), so this is unconditional and needs nobody at the
+# device. Without it StatusOverlay logs and no-ops (see
+# StatusOverlay.addView's catch) rather than crashing the service the real
+# daemon lives inside — the strip just never appears.
+adb shell appops set "$LAUNCHER_PKG" SYSTEM_ALERT_WINDOW allow >/dev/null
+echo "   done"
+
 echo "-- clearing Android's 'stopped' state + starting now"
 # A freshly-installed app that has never been run sits in the "stopped"
 # package state, and Android withholds implicit broadcasts — including
