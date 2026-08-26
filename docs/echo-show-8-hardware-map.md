@@ -395,3 +395,41 @@ adb shell tinymix                                     # mixer controls / routing
 adb shell 'tinycap /data/local/tmp/m.wav -D 0 -d 1 -c 2 -r 48000 -b 16 -T 3'
 adb shell getevent -lt                                # press each control to map it
 ```
+
+### Autostart: raw init.rc service cannot execve from /data — needs an APK launcher instead
+
+Tested live 2026-08-26: `echomuse_crown.rc` (a `service` block pointing straight
+at `/data/local/bin/server`) installs fine and init does try to start it, but
+every attempt fails identically:
+
+```
+init: cannot execv('/data/local/bin/server'). Permission denied
+init: Service 'echomuse' (pid NNNN) exited with status 127
+```
+
+Ruled out directly rather than guessed: `getenforce` reports **Permissive**
+(so this cannot be ordinary SELinux denial — permissive mode never blocks,
+only logs), the binary is `-rwxr-xr-x` root:root, `/data` is mounted with no
+`noexec` (`rw,seclabel,nosuid,nodev,noatime,...`), and it execs perfectly
+fine from an interactive `adb root` shell every time. Stripping the
+`seclabel u:r:su:s0` line and the `user`/`group` overrides did not help
+either — same failure, same exit 127.
+
+**This is a hard Android restriction on `init` executing untrusted `/data`
+binaries directly, independent of SELinux mode, and it's exactly what biscuit
+never hits** — `start_server.sh` on biscuit is installed as a **Magisk
+`service.d` script** (`DEBLOAT_SCRIPT_PATH`-style: Magisk's own daemon runs
+those, not raw init), which sidesteps this entirely. crown has root but
+**no Magisk at all** (userdebug `adb root` path — see "Platform" above), so
+that escape hatch does not exist here.
+
+**The standard fix on stock/non-Magisk Android is an APK with a
+`RECEIVE_BOOT_COMPLETED` receiver** that launches the binary as a foreground
+service from app context — ordinary app code execution from `/data` is
+unrestricted (that's how every installed app runs), it's specifically
+init's native `service` mechanism that's blocked. Not attempted yet: needs
+an Android SDK/gradle toolchain this session didn't have queued up, and
+building+signing a launcher APK is real scope, not a quick follow-up.
+Manual `provision_crown.sh` (push + start immediately, no reboot needed)
+remains the only way to run it until this exists — **crown does not
+currently survive a power cycle.**
