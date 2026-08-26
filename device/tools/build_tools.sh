@@ -44,8 +44,12 @@ build_module_tool() {
 }
 
 build_tool capture_mics
+build_tool aec_probe
 build_tool bf_capture
 build_module_tool oww_probe
+# hw_refine_probe imports internal/alsa (from PR #36), an internal package —
+# same reason oww_probe is module-mounted rather than standalone.
+build_module_tool hw_refine_probe
 
 echo ""
 echo "Deploy:"

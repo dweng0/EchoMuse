@@ -245,6 +245,46 @@ describing where audio physically goes) — needs the same before/during-capture
 mixer-diff method used to establish "no tinymix routing is involved" in mic
 capture above, repeated for the mute button specifically.
 
+### HW_REFINE, driver-asked not HAL-observed (2026-08-26)
+
+Everything above about the mic/speaker PCM shapes was inferred from what
+worked or what the HAL declares. Built `device/tools/hw_refine_probe`
+(module-mounted like `oww_probe`, since it needs the internal `alsa` package
+from PR #36) to ask the driver directly via `HW_REFINE` — the same method
+`docs/checkers-port.md` used to pin its constants, run here for the first
+time on crown.
+
+**Mic (`card0,device22`, capture):**
+```
+Formats:      [S24_3LE]
+Channels:     6..6        (fixed by the driver, channels_min == channels_max)
+Rate:         16000..48000 Hz
+Period size:  257..2570 frames
+Periods:      1..10
+```
+`257..2570` and `1..10` are **numerically identical to checkers' driver
+range** (`docs/checkers-port.md`) — not just the same driver name, the same
+compiled constants. Reinforces the shared amzn-mt-spi-pcm FPGA driver finding
+from the source investigation above. `capture_mics`' 512-frame/5-period
+config sits comfortably inside range (checkers needed 8 periods after
+measuring arrival-gap drops at 4; crown's margin under load is untested).
+
+**Speaker (`card0,device0`, playback):**
+```
+Formats:      [S16_LE fmt3 fmt4 fmt5 S24_LE fmt7 fmt8 fmt9 S32_LE fmt11 fmt12 fmt13]
+Channels:     1..2
+Rate:         8000..192000 Hz
+Period size:  0..18432 frames
+Periods:      1..4
+```
+More flexible than assumed — mono is available, not just the stereo `aec_probe`
+used. The `S16_LE/2ch/48000/1536-frame/4-period` config that streamed clean
+today sits well inside every range, so it wasn't a lucky guess. The unnamed
+`fmtN` entries are a gap in `internal/alsa`'s `Format.String()` table (only
+`S16_LE`/`S24_LE`/`S24_3LE`/`S32_LE` are named) rather than anything wrong
+with the driver — cosmetic, since the format actually in use (`S16_LE`) is
+named correctly.
+
 ## Inputs (buttons, mute, switches)
 
 All live-confirmed with `getevent -lt` while pressing each control:
