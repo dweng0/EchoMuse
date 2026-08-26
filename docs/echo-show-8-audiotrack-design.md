@@ -180,6 +180,70 @@ through our own mixer + socket + AudioFlinger), but the worst-case outcome
 this section worried about — silent fallback to the shared legacy mixer —
 is ruled out.
 
+## Real implementation, built and tested live (2026-08-26)
+
+`PlaybackServer.java` (crown_launcher) + `socket_pcm_crown.go` (device)
+implement the design above. Three real bugs found and fixed by testing on
+hardware, not by inspection — recorded because each one would have been a
+believable-looking wrong conclusion if testing had stopped early:
+
+1. **`LocalServerSocket`'s filesystem-namespace attempt silently became
+   abstract-namespace instead.** Its String constructor only ever binds
+   abstract; `LocalSocketAddress(...).getName()` just returns the raw name,
+   dropping the namespace choice. Confirmed via `/proc/<pid>/net/unix`
+   showing an `@`-prefixed entry, not a real dentry (`ls`/`find` on the
+   intended path found nothing). Not worth fighting — abstract sockets need
+   no stale-file cleanup and aren't gated by filesystem permission bits at
+   all, which only strengthens Q1's answer. Go dials it with the `@name`
+   convention.
+
+2. **A 25ms write deadline mistook AudioTrack backpressure for a dead
+   connection.** Raw ALSA gave `silenceLoop` its pacing for free (blocking
+   `Write` at hardware rate); a socket write returns as soon as the kernel
+   buffer has room, so without that the loop floods far faster than
+   AudioTrack drains, backpressure blocks the write, and 25ms is nowhere
+   near enough headroom for that ordinary case. Raised to 500ms — ruled
+   out as *the* problem, but did not fully fix the drops (see next).
+
+3. **The real cause: bursty delivery, not backpressure blocking.** With the
+   deadline fixed, connections still died reliably after ~0.6–1.3s of
+   streaming — reproducible on both `PERFORMANCE_MODE_LOW_LATENCY` and
+   `PERFORMANCE_MODE_NONE`, with **zero errors anywhere in the system log**
+   at the exact stall moment (no AudioFlinger warning, no HAL message,
+   nothing — a genuinely silent wedge). Bypassing `AudioTrack.write()`
+   entirely (discard the bytes, do nothing else) ran clean for 6+ seconds
+   with zero drops, isolating the fault to something about how the write
+   was being driven, not the socket/read path. Root cause: Go's writer had
+   no pacing of its own — it produced whatever the socket's backpressure
+   allowed, in bursts of several periods at once followed by a stall,
+   rather than one period every ~32ms. Adding explicit real-time pacing in
+   `socketPCM.Write` (one period every `len(buf)/48000/4` seconds,
+   matching the ALSA config exactly) fixed it outright: **2+ minutes
+   sustained, one connection, zero drops**, confirmed live with the daemon
+   log's own `[mic] clock` line as an independent time reference
+   (`120.2s audio over 120.1s wall`).
+
+   **This means the earlier live conclusion — "AudioTrack itself stalls
+   under sustained streaming on this ROM" — was wrong**, reached mid-session
+   before pacing was tried. Worth recording exactly because it looked
+   completely convincing at the time (reproducible, silent, present under
+   both performance modes) and would have wrongly closed off Scenario C
+   as non-viable if it had been accepted instead of chased one step
+   further.
+
+**Concurrent-load retest against the real (non-probe) service**: with the
+daemon's normal continuous speaker plane running through the real socket +
+`AudioTrack` path, browser audio playing concurrently on the device, and a
+volume-button press exercised mid-test — 30 seconds, zero freeze, zero
+drops, one stable connection, clean pstore. This is the actual production
+code path, not the throwaway `AudioProbeReceiver`.
+
+**Not yet done**: a real voice turn (TTS reply) through this path under
+concurrent load — everything above exercises the continuous silence
+stream, not real spoken audio content, though the mixing/pacing code is
+identical for both. A full soak (tens of minutes) is also still
+outstanding, per the original sequencing plan below.
+
 ## Sequencing
 
 1. **Run the Q2 probe** the moment a device is available — answers whether

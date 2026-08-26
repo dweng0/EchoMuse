@@ -34,8 +34,18 @@ var silencePeriod = make([]byte, periodBytes)
 // shared), a different ALSA client underneath. GoTinyAlsa needs libtinyalsa
 // from the FireOS sysroot and has never been run against this driver;
 // internal/alsa (used already for crown's HW_REFINE probing) needs neither.
+// pcmWriter is satisfied by both *alsa.PCM (raw /dev/snd) and *socketPCM
+// (feeds crown_launcher's AudioTrack service over a Unix socket instead —
+// see socket_pcm_crown.go and docs/echo-show-8-freeze-scenarios.md,
+// Scenario C). silenceLoop and Close only ever call Write/Close, so
+// nothing else in this file needs to know which one it has.
+type pcmWriter interface {
+	Write(buf []byte) (int, error)
+	Close() error
+}
+
 type PcmSpeaker struct {
-	pcm    *alsa.PCM
+	pcm    pcmWriter
 	stopCh chan struct{}
 	deadCh chan struct{}
 
@@ -81,28 +91,33 @@ func NewPcmSpeaker(echoTap func([]byte), levelTap func(rms float64)) (*PcmSpeake
 // silence the device with nothing logged, the exact trap checkers' README
 // warns about for the same RT5616 codec.
 func (p *PcmSpeaker) Init() error {
-	waitForFreePcm(cardNr, deviceNr, pcmFreeTimeout)
-
-	pcm, err := alsa.Open(alsa.Config{
-		Card: cardNr, Device: deviceNr, Playback: true,
-		Channels: 2, Format: alsa.FormatS16LE, Rate: 48000,
-		PeriodSize: periodSize, Periods: 4,
-	})
-	if err != nil {
-		return err
-	}
-	p.pcm = pcm
+	// Playback no longer opens /dev/snd directly on crown — it feeds
+	// crown_launcher's AudioTrack-backed service over a Unix socket
+	// instead, so mediaserver arbitrates the DL1 hardware path normally
+	// rather than contending with an exclusive hold on it (pstore evidence
+	// of that contention wedging the DSP is in
+	// docs/echo-show-8-audio-freeze-handoff.md; the fix is designed in
+	// docs/echo-show-8-audiotrack-design.md and proved live under
+	// concurrent load, see docs/echo-show-8-freeze-scenarios.md, Scenario
+	// C). waitForFreePcm/alsa.Open are gone from this path entirely — the
+	// socket has nothing to wait on, and connecting is handled lazily by
+	// socketPCM itself (see socket_pcm_crown.go).
+	p.pcm = newSocketPCM(crownPlaybackSocket)
 
 	go p.silenceLoop()
 
-	time.Sleep(100 * time.Millisecond) // silence reaches the DAC
+	// Same pop-prevention wait as the raw-ALSA path had (silence reaching
+	// the DAC before un-muting the external amp) — keeping it rather than
+	// assuming AudioTrack's own startup has no equivalent transient, since
+	// that hasn't been checked by ear yet on this path.
+	time.Sleep(100 * time.Millisecond)
 	if err := alsa.Apply(cardNr, []alsa.Control{
 		{Name: "Ext_Speaker_Amp_Switch", Values: []string{"Off"}, Optional: true},
 	}); err != nil {
 		log.Printf("[speaker] amp enable: %v", err)
 	}
 
-	log.Println("PcmSpeaker (crown) initialised — silence stream running")
+	log.Println("PcmSpeaker (crown) initialised — playback via AudioTrack socket")
 	return nil
 }
 
