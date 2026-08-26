@@ -2142,13 +2142,18 @@ async def _stream_file_to_device(live, data: bytes, dest: str,
         # arrives by `mv` over whatever was there.
 
         # ── Detect available base64 decoder ──────────────────────────────────
-        # Try busybox first (Magisk provides it), then python3/python.
-        # We run a round-trip sanity test so we know the decode flag works.
-        # The md5 tool is detected in the SAME round trip, not a second one.
-        # busybox first for the same reason as the decoder (Magisk provides
-        # it); bare md5sum as a fallback since some SKUs have it in PATH.
+        # Try busybox first (Magisk provides it), then plain base64 in PATH
+        # (toybox on stock/LineageOS userland — crown has this and NO
+        # busybox, found 2026-08-26: every secure_link/provisioning transfer
+        # to it failed "no base64 decoder" despite /system/bin/base64
+        # existing, because this used to check only busybox then python3/
+        # python and never the device's own base64), then python3/python as
+        # a last resort. We run a round-trip sanity test so we know the
+        # decode flag works. The md5 tool is detected in the SAME round
+        # trip, not a second one.
         await ws.send(
             "if echo dGVzdA== | busybox base64 -d >/dev/null 2>&1; then echo DECODER:busybox; "
+            "elif echo dGVzdA== | base64 -d >/dev/null 2>&1; then echo DECODER:plain; "
             "elif python3 -c 'import base64,sys; sys.stdout.buffer.write(base64.b64decode(sys.stdin.read()))' </dev/null >/dev/null 2>&1; then echo DECODER:python3; "
             "elif python  -c 'import base64,sys; sys.stdout.write(base64.b64decode(sys.stdin.read()))' </dev/null >/dev/null 2>&1; then echo DECODER:python; "
             "else echo DECODER:none; fi; "
@@ -2171,6 +2176,8 @@ async def _stream_file_to_device(live, data: bytes, dest: str,
 
         if "DECODER:busybox" in detect_buf:
             decode_cmd = "busybox base64 -d"
+        elif "DECODER:plain" in detect_buf:
+            decode_cmd = "base64 -d"
         elif "DECODER:python3" in detect_buf:
             decode_cmd = ("python3 -c "
                           "'import sys,base64; "
