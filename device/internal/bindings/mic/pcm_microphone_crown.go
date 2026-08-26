@@ -24,13 +24,23 @@ const cardNr = 0
 const deviceNr = 22
 const channels = 6
 
-// periodFrames/periods are carried from the working capture_mics config
-// (well inside the HW_REFINE range 257..2570 frames / 1..10 periods);
-// checkers needed 8 periods after measuring arrival-gap drops at 4 under
-// playback load — crown's margin under load is unmeasured, so this starts at
-// the same margin rather than the untested minimum.
+// periodFrames/periods: EXACTLY capture_mics' proven config (512/5), not a
+// margin choice. HW_REFINE reports 257..2570 frames / 1..10 periods per
+// dimension independently, which does not mean every combination inside
+// those ranges is jointly achievable — internal/alsa.Open() sets each
+// param via setExact (fixed value), not "nearest", so a combination the
+// driver can't hit fails HW_PARAMS outright rather than rounding. Tried
+// 512/8 first (checkers' post-load-testing margin, carried over as a
+// starting point) and it failed on real hardware 2026-08-26 with
+// "HW_PARAMS ... invalid argument" despite every individual field being
+// in-range — the buffer_size=512*8=4096 combination itself isn't valid
+// here even though the periods and period-size intervals overlap it.
+// 512/5 (2560 frames, capture_mics' -channels 6 5 invocation, the one
+// combination actually opened on this driver) works. Margin under load is
+// therefore still unmeasured, same as before, but the number is real now
+// rather than borrowed from a different board's driver.
 const periodFrames = 512
-const periods = 8
+const periods = 5
 
 // PcmMicrophone is crown's capture binding: same fan-out-to-subscribers shape
 // as biscuit's (pcm_microphone.go), over internal/alsa's blocking Read
@@ -72,13 +82,22 @@ func (m *PcmMicrophone) Init() error {
 	return nil
 }
 
-// readLoop reads fixed-size periods forever and fans each one out to every
+// readLoop reads whole-ring batches forever and fans each one out to every
 // current subscriber, mirroring biscuit's readLoop (pcm_microphone.go) —
 // same stall/clock telemetry, same copy-per-subscriber, same close-all-on-
 // death behaviour — over a plain blocking Read instead of a stream channel.
+//
+// Reads periodFrames*periods (one full buffer, ~160ms) per call rather than
+// one 512-frame/32ms period at a time. Measured on real hardware
+// 2026-08-26: reading single periods stalled on nearly every call (66-84ms
+// between 32ms batches, i.e. losing ~35-50ms every ~70ms) — the same reason
+// CLAUDE.md documents for biscuit's GoTinyAlsa binding reading its whole
+// ALSA buffer per chunk rather than one period at a time. Same SoC family
+// (MT8163), evidently the same scheduling-granularity floor.
 func (m *PcmMicrophone) readLoop() {
-	periodBytes := periodFrames * channels * 3 // S24_3LE
-	buf := make([]byte, periodBytes)
+	batchFrames := periodFrames * periods
+	batchBytes := batchFrames * channels * 3 // S24_3LE
+	buf := make([]byte, batchBytes)
 
 	rate := int64(16000)
 	var (
