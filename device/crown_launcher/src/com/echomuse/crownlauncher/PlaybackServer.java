@@ -116,8 +116,9 @@ class PlaybackServer implements Runnable {
 
     private void handleConnection(LocalSocket client) throws IOException {
         AudioTrack track = buildTrack();
-        AudioFocusRequest focusRequest = requestDuckFocus();
         track.play();
+        AudioFocusRequest focusRequest = null;
+        int silentStreak = 0;
         try {
             InputStream in = client.getInputStream();
             byte[] lenBuf = new byte[4];
@@ -131,12 +132,48 @@ class PlaybackServer implements Runnable {
                 byte[] frame = new byte[len];
                 readFully(in, frame, len);
                 track.write(frame, 0, len);
+
+                // This connection lives for the daemon's whole run (its own
+                // mix loop never closes the socket, and idle periods arrive
+                // as real, continuously-written silence — see
+                // pcm_speaker_crown.go's silenceLoop) — so focus must track
+                // audio activity within the stream, not the connection.
+                // Holding it for the connection's lifetime would duck other
+                // apps permanently from boot instead of per turn, which is
+                // what actually happened on the first cut of this: measured
+                // live via `dumpsys audio`, one requestAudioFocus() at
+                // connect and no abandon ever, 2026-08-26.
+                if (isSilent(frame)) {
+                    silentStreak++;
+                    if (focusRequest != null && silentStreak >= SILENCE_DEBOUNCE_FRAMES) {
+                        audioManager.abandonAudioFocusRequest(focusRequest);
+                        focusRequest = null;
+                    }
+                } else {
+                    silentStreak = 0;
+                    if (focusRequest == null) focusRequest = requestDuckFocus();
+                }
             }
         } finally {
             track.stop();
             track.release();
             if (focusRequest != null) audioManager.abandonAudioFocusRequest(focusRequest);
         }
+    }
+
+    // Debounced rather than dropping focus on the very first silent frame:
+    // ordinary speech has brief internal gaps, and reacquiring focus on
+    // every one would flap other apps' volume mid-sentence. ~6 frames is a
+    // deliberately short window — one write is one ALSA period from
+    // pcm_speaker_crown.go's mix loop (~32ms), so this is roughly 200ms of
+    // continuous silence before releasing.
+    private static final int SILENCE_DEBOUNCE_FRAMES = 6;
+
+    private static boolean isSilent(byte[] frame) {
+        for (byte b : frame) {
+            if (b != 0) return false;
+        }
+        return true;
     }
 
     // AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK, not the exclusive TRANSIENT: a
