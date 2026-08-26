@@ -128,6 +128,38 @@ and looks easy — sequence #5 before #6, and treat #6 as "measure on a current
 build," downgraded from "high-risk spike." A TDM bring-up from scratch is not on
 the table.
 
+### On-hardware capture (2026-08-26) — the go/no-go measurement, done
+
+Ran `device/tools/capture_mics -card 0 -device 22 -channels 6 5` (built with the
+new per-flag card/device/channel args, previously hardcoded to `biscuit`'s
+0/24/9ch) against a real `crown` unit over `adb`, as root. **Opens and streams
+clean at 6ch/16kHz/`S24_3LE` — no ALSA errors, no digital zeros.** (One
+blocker on the way: `/dev/snd/pcmC0D22c` is `system:audio`-owned and `adb
+shell` starts as uid 2000 `shell`, not root — needs `adb root` first, same as
+any other privileged ALSA node on this platform.)
+
+Per-channel RMS/peak over a 4.64s capture, with music playing in the room
+(not a quiet-room SNR test, just a "does it capture real audio" check):
+
+| Channel | RMS (dBFS) | Peak (dBFS) |
+|---|---|---|
+| ch0 | −32.3 | −17.9 |
+| ch1 | −32.5 | −18.1 |
+| ch2 | −29.4 | −13.3 |
+| ch3 | −30.1 | −14.3 |
+| ch4 | −46.1 | −30.1 |
+| ch5 | −47.0 | −29.8 |
+
+ch0–3 (the 4 real capsules) run hot with real, unclipped signal; ch4–5 (the
+spare/reference slots) sit ~15dB quieter, consistent with them not being live
+mic channels. **This confirms the interface-doc reframe: capture is a config
+change, not a bring-up problem** — the upstream gain fix is doing its job.
+
+**Not yet measured: quiet-room, speech-level, across-room SNR** — this was a
+loud-room sanity check, not the wake-reliability test. The once-per-boot
+silent-capture bug (line 117 above) also remains unconfirmed either way; this
+run was a single 5s capture, not a reconnect-cycle test.
+
 **References**
 
 - XDA `crown` thread (canonical discussion, incl. mic reports):
