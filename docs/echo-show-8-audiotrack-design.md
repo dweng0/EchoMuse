@@ -238,11 +238,35 @@ volume-button press exercised mid-test — 30 seconds, zero freeze, zero
 drops, one stable connection, clean pstore. This is the actual production
 code path, not the throwaway `AudioProbeReceiver`.
 
-**Not yet done**: a real voice turn (TTS reply) through this path under
-concurrent load — everything above exercises the continuous silence
-stream, not real spoken audio content, though the mixing/pacing code is
-identical for both. A full soak (tens of minutes) is also still
-outstanding, per the original sequencing plan below.
+**Real voice turn under concurrent load (2026-08-26, later)**: a full
+wake→turn→TTS reply while browser audio played concurrently — 83 periods
+of real speech audio, **zero underruns**, zero socket drops, one stable
+connection, device fully responsive, pstore clean throughout. This is
+actual TTS content through the mixer, not the continuous silence stream —
+the strongest evidence yet, since the pacing fix (above) was derived
+against the silence stream and needed to hold for real content too.
+
+**10-minute unattended soak (2026-08-26, later)**: 60 liveness checks at
+10s intervals, zero freeze, zero drops, one connection the whole run,
+pstore clean at the end. The daemon's own `[mic] clock` line independently
+confirms ~841s of continuous uptime with near-zero drift (`deficit -142ms`
+over 841s audio) — covers the freeze #2 profile from the original handoff
+doc (no confirmed trigger, purely time-based), not just the active-load
+case. **A second real voice turn was triggered by wake word mid-soak**
+(user away from the keyboard) — 86 periods, zero underruns, same clean
+profile as the first turn: the wake path, not just a manually-triggered
+turn, holds up unattended.
+
+**One known gap, not a regression**: cross-app ducking doesn't happen —
+`duckDb`/`Mixer.duckTarget` only ever ducked crown's own voice-vs-music
+planes against each other (one process, two internal streams). Now that
+the browser's audio is a genuinely separate `AudioTrack` client mixed by
+`AudioFlinger`, our mixer has no reach over it, and never did — this was
+always true, just newly visible now that concurrent playback survives at
+all. The real fix is a transient `AudioFocus` request per turn (Android's
+standard mechanism — other apps duck/pause automatically while focus is
+held), tracked as its own follow-up in the Sequencing section below, not
+folded into the freeze fix itself.
 
 ## Sequencing
 
