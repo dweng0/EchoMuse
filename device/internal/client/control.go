@@ -266,6 +266,13 @@ func (c *ControlClient) connect(ctx context.Context, server *discovery.ServerInf
 		// device shows "needs newer firmware" rather than a toggle that
 		// silently does nothing.
 		"capabilities": capabilities(),
+		// Decorative only (ADR-0003) — nothing on either side ever branches on
+		// this string, it exists so a human looking at Home Assistant's device
+		// page can tell which physical board answered. Absent on older
+		// firmware; the controller falls back to its own default rather than
+		// showing a blank model, per "degrade to old behaviour, never a wrong
+		// answer" (repo CLAUDE.md).
+		"model": modelName(),
 		// Why the ambient light sensor is or is not available. A capability
 		// list says WHAT a device has; when the answer is "nothing", nobody
 		// can tell an absent chip from an unbound driver without a shell

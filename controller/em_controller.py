@@ -281,6 +281,10 @@ class Device:
         self.control_ws   = control_ws
         # Set from the register message; None on firmware that predates it.
         self.ambient_light_status: dict | None = None
+        # Decorative board label (ADR-0003), from the register message.
+        # None on firmware that predates it — em_esphome falls back to its
+        # own default rather than showing a blank model.
+        self.model: str | None = None
 
         self.data_ws: WebSocketServerProtocol | None = None
         # Remaining reconnect grace for the speaker stream in flight. Armed by
@@ -2665,6 +2669,8 @@ async def handle_control(ws: WebSocketServerProtocol, secure: bool = False):
         # to tell them apart. Absent on firmware that does not send it, which
         # reads as "not reported" rather than as a fault.
         device.ambient_light_status = msg.get("ambient_light_status")
+        # Decorative only (ADR-0003) — never branched on, just displayed.
+        device.model = msg.get("model")
         # Link-security telemetry for the dashboard: True when this control
         # connection arrived over the TLS listener.
         device.secure = secure
@@ -2789,6 +2795,7 @@ async def handle_control(ws: WebSocketServerProtocol, secure: bool = False):
         # entities are advertised, and advertising is a one-shot at
         # ListEntities time.
         esphome.set_device_capabilities(device_id, capabilities)
+        esphome.set_device_model(device_id, device.model)
         await esphome.device_connected(
             device_id,
             SERVER_HOST,

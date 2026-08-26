@@ -14,3 +14,9 @@ package client
 func capabilities() []string {
 	return []string{"mic", "speaker", "leds", "buttons"}
 }
+
+// modelName is decorative (ADR-0003). "crown" is the LineageOS port's own
+// codename (ro.product.device=crown) — see the codename note at the top of
+// docs/echo-show-8-hardware-map.md: an earlier draft used "hoya", which is
+// Amazon's codename for the Echo Show *5*, and the wrong board entirely.
+func modelName() string { return "Echo Show 8 Gen 1 (crown)" }

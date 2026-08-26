@@ -300,6 +300,7 @@ class EchoMuseSatellite(SatelliteServerProtocol):
         mac_address: str,
         oww_model_id: str,
         on_disconnected_cb,
+        model: str | None = None,  # decorative board label (ADR-0003)
         owning_server=None,   # DeviceESPhomeServer — back-reference so the
                               # standalone-announce path can read the live
                               # _standalone_play callback rather than a
@@ -316,6 +317,9 @@ class EchoMuseSatellite(SatelliteServerProtocol):
         self.label          = label
         self.mac_address    = mac_address
         self.oww_model_id   = oww_model_id
+        # Decorative only (ADR-0003) — never branched on. Falls back to the
+        # global default for firmware that predates the field.
+        self.model          = model or ESPHOME_DEVICE_MODEL
         self._owning_server  = owning_server
 
         # Set on the base class so connection_lost dispatches back to
@@ -425,12 +429,12 @@ class EchoMuseSatellite(SatelliteServerProtocol):
                 friendly_name=f"{self.label} Voice Assistant",
                 mac_address=self.mac_address,
                 manufacturer="EchoMuse",
-                model=ESPHOME_DEVICE_MODEL,
+                model=self.model,
                 # CRITICAL: dot notation required — HA's manager.py does
                 # project_name.split(".") unconditionally. No dot → IndexError
                 # → device silently never appears in Devices & Services.
                 # (session handoff finding #1)
-                project_name=f"EchoMuse.{ESPHOME_DEVICE_MODEL}",
+                project_name=f"EchoMuse.{self.model}",
                 project_version=ESPHOME_PROJECT_VERSION,
                 voice_assistant_feature_flags=VOICE_ASSISTANT_FLAGS,
             )
@@ -1847,9 +1851,19 @@ class DeviceESPhomeServer:
         # problem: HA does not reconnect on its own, so the entity stayed
         # missing for the life of the connection.
         self.capabilities: list[str] = []
+        # Decorative board label (ADR-0003) — displayed in HA's device info,
+        # never branched on. Defaults to the global fallback until the
+        # device's register message arrives (or forever, on firmware that
+        # predates the field) — never None, so a server built before that
+        # message lands (the startup loop, from persisted DB rows) never
+        # renders a blank model.
+        self.model: str = ESPHOME_DEVICE_MODEL
 
     def set_capabilities(self, caps: list[str]) -> None:
         self.capabilities = list(caps or [])
+
+    def set_model(self, model: str | None) -> None:
+        self.model = model
 
     def get_satellite(self) -> Optional[EchoMuseSatellite]:
         """Return the active HA connection's satellite instance, or None."""
@@ -1879,6 +1893,7 @@ class DeviceESPhomeServer:
             mac_address=self.mac_address,
             oww_model_id=self.oww_model_id,
             on_disconnected_cb=self._on_satellite_disconnected,
+            model=self.model,
             owning_server=self,
         )
         self._active_satellite = satellite
@@ -1952,6 +1967,9 @@ _servers: dict[str, DeviceESPhomeServer] = {}
 # comes up once the device is present), so without this the very first
 # ListEntities — the one HA caches — is built from an empty list.
 _pending_caps: dict[str, list[str]] = {}
+# Same one-shot-race reason as _pending_caps, for the decorative model label
+# (ADR-0003): the device's register message always precedes server creation.
+_pending_model: dict[str, str] = {}
 _azc: Optional[AsyncZeroconf] = None
 
 
@@ -2040,11 +2058,14 @@ async def _register_device_server(device_id: str, label: str | None) -> DeviceES
     caps = _pending_caps.get(device_id)
     if caps:
         server.set_capabilities(caps)
+    model = _pending_model.get(device_id)
+    if model:
+        server.set_model(model)
     _servers[device_id] = server
 
     # mDNS registration — _esphomelib._tcp, one per device port,
     # same pattern as the controller's own _emcontroller._tcp service.
-    mdns_info = _make_device_mdns_info(device_id, label, port, mac)
+    mdns_info = _make_device_mdns_info(device_id, label, port, mac, server.model)
     try:
         await _azc.async_register_service(mdns_info, allow_name_change=True)
         server.set_mdns_info(mdns_info)
@@ -2479,6 +2500,22 @@ async def device_disconnected(device_id: str) -> None:
     log.info(f"[esphome.{device_id[-8:]}] ESPHome port {server.port} down (device disconnected)")
 
 
+def set_device_model(device_id: str, model: str | None) -> None:
+    """
+    Called by em_controller when a device registers, same reason and same
+    pending-dict shape as set_device_capabilities — the register message
+    always precedes server creation. No entity-list race to worry about
+    here (ADR-0003: decorative only), so unlike capabilities this never
+    needs to bounce an existing HA connection.
+    """
+    if not model:
+        return
+    _pending_model[device_id] = model
+    server = _servers.get(device_id)
+    if server is not None:
+        server.set_model(model)
+
+
 def set_device_capabilities(device_id: str, caps: list[str]) -> None:
     """
     Called by em_controller when a device registers, BEFORE the server for it
@@ -2616,7 +2653,7 @@ def _mdns_service_name(device_id: str) -> str:
 
 
 def _make_device_mdns_info(device_id: str, label: str, port: int,
-                           mac: str) -> ServiceInfo:
+                           mac: str, model: str = ESPHOME_DEVICE_MODEL) -> ServiceInfo:
     svc_name = _mdns_service_name(device_id)
     return ServiceInfo(
         "_esphomelib._tcp.local.",
@@ -2636,7 +2673,7 @@ def _make_device_mdns_info(device_id: str, label: str, port: int,
             # required to agree, and nothing reports it if they stop.
             "mac": mac.replace(":", "").lower(),
             "network": "ethwifi",
-            "project_name": f"EchoMuse.{ESPHOME_DEVICE_MODEL}",
+            "project_name": f"EchoMuse.{model}",
             "project_version": ESPHOME_PROJECT_VERSION,
         },
         server=f"{svc_name}.local.",
