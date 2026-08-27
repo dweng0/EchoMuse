@@ -7,11 +7,26 @@ specification rather than by reading the Dot's source. The controller is
 already board-agnostic; a new board is almost entirely a fresh set of hardware
 **Bindings** behind this same wire protocol.
 
-Terms in **bold** are defined in [CONTEXT.md](../CONTEXT.md). The authoritative
+Terms in **bold** are used in their ordinary sense here (device, controller,
+capability, plane); no external glossary is required. The authoritative
 source for every message and field is the code cited inline; where this
 document and the code disagree, the code wins and this document is the bug.
 
-## The two rules everything else serves
+**Stability.** Each section below is marked STABLE or EXPECTED TO CHANGE.
+STABLE means implement against it now. EXPECTED TO CHANGE means the shape
+described is real and current, but a specific, already-decided change is
+coming and a new implementer should not treat it as the permanent target —
+follow the note in that section for what changes and what doesn't.
+
+**Negotiation is one-directional, and that's a known limit, not an
+omission.** The device announces what it implements; the controller reads
+that and replies with `pending` or silence (`em_controller.py:2906`) — it
+announces nothing back. That's sufficient while both halves ship from this
+repo. It stops being sufficient the moment a third-party device wants to use
+something conditionally on what a *specific controller version* supports,
+and nothing in this document solves that yet.
+
+## The two rules everything else serves (STABLE)
 
 Both are guarded by `controller/tests/test_capabilities.py`. A board that
 honours them can pair with any controller version, and vice versa.
@@ -27,11 +42,17 @@ honours them can pair with any controller version, and vice versa.
   measurement, absence stores as **NULL, not 0** — a device that cannot report
   a thing must not read as having reported zero.
 
-## The three planes
+## The three planes (STABLE, discovery EXPECTED TO CHANGE)
 
 Each device opens **three** WebSocket connections to the controller. The
 controller is discovered by mDNS (`_emcontroller._tcp.local`); the device dials
 out on all three.
+
+**mDNS won't stay the only discovery path.** Static IP and DNS-based discovery
+land alongside it (#106, #166) for routed and tunneled setups where mDNS
+doesn't reach. mDNS stays as one option among several, not the sole mechanism
+— a board implementer should treat "how do I find the controller" as
+configurable, not hardcoded to `_emcontroller._tcp.local`.
 
 | Path | Payload | Direction | Purpose |
 |------|---------|-----------|---------|
@@ -43,7 +64,17 @@ All three exist in plain (`ws://`) and TLS (`wss://`) form; see
 [Link auth & TLS](#link-auth--tls). The `/shell` plane is not dialled until the
 controller asks for it.
 
-## Registration and capabilities
+## Registration and capabilities (STABLE)
+
+**No namespace convention exists yet for capability strings.** All current
+strings (`mic`, `speaker`, `leds`, ...) are short, unprefixed, and minted by
+this repo. Nothing stops a third-party device from minting a new string that
+later collides with one this project mints for something else — both sides
+would silently ignore the mismatch, per the degrade rule above, and neither
+side gets an error. Until a registry or vendor-prefix scheme exists, a
+third-party capability should pick a name unlikely to collide (e.g. a
+project-specific prefix) and expect it to be renamed later if this project
+claims the same string for something else.
 
 Immediately after the `/control` socket opens, the device sends one `register`
 message (`device/internal/client/control.go`):
@@ -126,12 +157,26 @@ absent optional fields take prior/default behaviour.
 | `shell_open` / `shell_close` | `pty?` | Ask the device to dial `/shell` (`pty:true` = interactive) / close it |
 | `music_flush` / `speaker_flush` | — | Flush the music / voice buffer (barge-in uses `speaker_flush`) |
 
-## `/data` — binary frames
+## `/data` — binary frames (playback path EXPECTED TO CHANGE)
 
 First byte is the frame type; the rest is the payload. **The type codes are
 namespaced by direction** — `0x04`/`0x05` mean different things depending on who
 sent them, and this is deliberate (`device/internal/client/data.go:25`). A
 board implementer must not read a single global table.
+
+**`0x01`–`0x05` are taken, in both directions. No range is reserved yet for a
+third-party frame type.** Don't mint a new code above `0x05` and assume it's
+free — treat this as unallocated space until a reservation scheme exists,
+and check back here rather than guessing.
+
+**The controller→device playback frames (`0x02`–`0x05`) are the fallback
+path, not the target.** #334 moves the device to fetching its own audio from
+the controller rather than having PCM pushed at it. Push isn't going away —
+it stays permanently as the capability-gated fallback for a device that
+doesn't implement fetch, no flag day — but new device work should target the
+fetch model once it lands, not build further on push. Implement against
+`0x02`/`0x03` today if that's what's specified for your board's MVP, but
+don't treat them as the permanent playback contract.
 
 **Controller → Device (playback)**
 
@@ -164,7 +209,7 @@ Mic stream shapes (`device/CLAUDE.md`, Device audio pipeline):
   ends with a `0x04` sentinel when the gate closes after speech, and ends with
   `0x05` if no speech arrived within the timeout.
 
-## Config push — `ConfigMessage`
+## Config push — `ConfigMessage` (fields STABLE, output-chain ownership EXPECTED TO CHANGE)
 
 The controller sends `config` on connect and on any per-device config change.
 Fields are camelCase (`device/internal/config/config.go`). **Partial update:
@@ -189,16 +234,25 @@ ledScene, ledListenColor, ledThinkColor,
 meterAttack, meterDecay, meterFloor, meterGamma, meterRef, meterCurve,
 wakeArbitrationMs, duckDb,
 buttonSingleTapEvent, buttonMultiTapMs,
-owwOnDevice, saveUtterances
+saveUtterances
 ```
 
-Not every field is acted on by the device. The output-chain keys (`limiter*`,
-`bassGuard*`), `eq*`, `saveUtterances`, `wakeArbitrationMs`, and the `button*`
-timing keys are **controller-side** — that processing happens before the audio
-reaches the wire, or is used only for config scoping. `owwOnDevice` is both
-controller-consumed (scoping) and device-acted. A new board only needs to
-implement the keys relevant to hardware it actually has; unknown keys are
-ignored, which is the correct degrade.
+Not every field is acted on by the device. `saveUtterances`,
+`wakeArbitrationMs`, and the `button*` timing keys are **controller-side
+only** — used for config scoping, never applied on-device. `owwOnDevice` is
+both controller-consumed (scoping) and device-acted where `oww_shadow` /
+`oww_trigger` are announced.
+
+**The output-chain keys (`eq*`, `limiter*`, `bassGuard*`) are
+capability-dependent, not unconditionally controller-side.** That's true
+today because output processing happens entirely controller-side before
+audio reaches the wire — but 3.0.0 moves the output chain onto the device
+(#243, #272) for boards that implement it. Read it as: controller-side for a
+device *without* the relevant capability, device-acted for one *with* it.
+Don't hardcode "these keys are never applied on-device" into a board binding
+— check the capability instead. A new board only needs to implement the keys
+relevant to hardware it actually has; unknown keys are ignored, which is the
+correct degrade.
 
 ## Link auth & TLS
 
