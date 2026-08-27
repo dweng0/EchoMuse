@@ -20,6 +20,7 @@ package alsa
 import (
 	"encoding/binary"
 	"fmt"
+	"log"
 	"syscall"
 	"unsafe"
 )
@@ -213,6 +214,19 @@ type PCM struct {
 	fd            int
 	bytesPerFrame int
 	bufferFrames  uint32
+	// EPIPE recovery counters (read=overrun, write=underrun). One PCM is
+	// driven by exactly one goroutine (the mic/speaker binding's own
+	// loop), so plain fields are enough — no concurrent caller to race.
+	// Added 2026-08-27: recovery here used to be completely silent
+	// (return 0, nil, caller just calls again), which is fine for a rare
+	// event and useless if it's actually happening constantly — a device
+	// stuck in a recovery loop would look identical to a healthy one from
+	// this package's own log output alone. Logged every 64th occurrence,
+	// same rate-limiting shape the mic binding already uses for dropped
+	// subscriber batches, so a real storm is visible without one per
+	// occurrence flooding the log.
+	epipeReads  uint64
+	epipeWrites uint64
 }
 
 // Path is the character device backing this stream.
@@ -367,6 +381,12 @@ func (p *PCM) Read(buf []byte) (int, error) {
 		if e := ioctl(p.fd, ioctlStart, nil); e != nil {
 			return 0, fmt.Errorf("restart after overrun: %w", e)
 		}
+		p.epipeReads++
+		if p.epipeReads == 1 || p.epipeReads%64 == 0 {
+			log.Printf("[alsa] capture overrun recovered (count=%d) — a caller "+
+				"seeing 'no frames' with this counter climbing means the stream "+
+				"is thrashing recovery, not silent", p.epipeReads)
+		}
 		return 0, nil
 	}
 	if err != nil {
@@ -382,6 +402,10 @@ func (p *PCM) Write(buf []byte) (int, error) {
 	if err == syscall.EPIPE {
 		if e := p.Prepare(); e != nil {
 			return 0, e
+		}
+		p.epipeWrites++
+		if p.epipeWrites == 1 || p.epipeWrites%64 == 0 {
+			log.Printf("[alsa] playback underrun recovered (count=%d)", p.epipeWrites)
 		}
 		return 0, nil
 	}

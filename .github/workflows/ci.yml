@@ -436,3 +436,50 @@ jobs:
       - name: Run go vet
         working-directory: device
         run: go vet ./internal/... ./pkg/...
+
+  device-firmware-build-crown:
+    name: Device firmware build (crown, pinned compiler)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true  # GoTinyAlsa replace directive in device/go.mod —
+          # crown never imports it, but the module graph still needs it
+          # present to resolve, same as compile.sh's own unconditional mount.
+      # Every *_crown.go file (mic/speaker/led/buttons/capabilities bindings,
+      # internal/alsa, crown_launcher's counterpart PlaybackServer socket)
+      # was, until this job existed, invisible to CI entirely — none of the
+      # jobs above pass `-tags crown`, so a build-breaking typo or interface
+      # drift in this whole board's worth of code would only surface on
+      # someone's next manual `./compile.sh crown` or a real hardware flash.
+      # Found in review 2026-08-27. Mirrors device-firmware-build exactly,
+      # `-tags crown` instead of `-tags server`.
+      - name: Build compiler image
+        run: docker build -t echomuse-compiler device/compiler/
+      - name: Build firmware (crown)
+        run: |
+          docker run --rm --entrypoint bash \
+            -e CGO_LDFLAGS="-Wl,--hash-style=both" \
+            -e CGO_CFLAGS="-Wno-deprecated-declarations -Wno-null-dereference" \
+            -v "$PWD/device":/sdk \
+            -v "$PWD/GoTinyAlsa":/GoTinyAlsa \
+            echomuse-compiler \
+            -c "cd /sdk && go build -tags crown -o build/crown ./cmd/"
+      - name: Check it is an ARM binary
+        run: |
+          file device/build/crown
+          file device/build/crown | grep -q "ARM" || {
+            echo "::error::crown firmware is not an ARM binary"; exit 1; }
+      - name: go vet (crown)
+        # Same compiler image, same cross-toolchain — vet needs to resolve
+        # the cgo boundary (internal/aec is unconditional either way)
+        # against the pinned NDK, the same reason the build itself has to
+        # run in this image rather than on the host's amd64 toolchain.
+        run: |
+          docker run --rm --entrypoint bash \
+            -e CGO_LDFLAGS="-Wl,--hash-style=both" \
+            -e CGO_CFLAGS="-Wno-deprecated-declarations -Wno-null-dereference" \
+            -v "$PWD/device":/sdk \
+            -v "$PWD/GoTinyAlsa":/GoTinyAlsa \
+            echomuse-compiler \
+            -c "cd /sdk && go vet -tags crown ./internal/... ./pkg/... ./cmd/..."

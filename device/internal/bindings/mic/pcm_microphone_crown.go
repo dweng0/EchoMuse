@@ -79,6 +79,14 @@ func (m *PcmMicrophone) Init() error {
 		return err
 	}
 	m.pcm = pcm
+	// Missing until review 2026-08-27: the speaker binding logs
+	// "PcmSpeaker (crown) initialised" on successful Init, and this one
+	// never had an equivalent — so a device log showing everything else
+	// starting cleanly (speaker, LEDs, control connection) but nothing here
+	// is indistinguishable from a device where this line was never added at
+	// all. Both readings used to be the same log; they no longer are.
+	log.Printf("PcmMicrophone (crown) initialised — capture card=%d device=%d channels=%d",
+		cardNr, deviceNr, channels)
 	go m.readLoop()
 	return nil
 }

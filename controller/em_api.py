@@ -55,6 +55,7 @@ import em_db as db
 import em_auth as auth
 import em_ble_proxy
 import em_config_sections as sections_mod
+import em_decoder
 import em_firmware
 import em_ingressauth
 import em_oww_assets
@@ -2174,44 +2175,23 @@ async def _stream_file_to_device(live, data: bytes, dest: str,
             except asyncio.TimeoutError:
                 continue
 
-        if "DECODER:busybox" in detect_buf:
-            decode_cmd = "busybox base64 -d"
-        elif "DECODER:plain" in detect_buf:
-            decode_cmd = "base64 -d"
-        elif "DECODER:python3" in detect_buf:
-            decode_cmd = ("python3 -c "
-                          "'import sys,base64; "
-                          "sys.stdout.buffer.write(base64.b64decode(sys.stdin.read()))'")
-        elif "DECODER:python" in detect_buf:
-            decode_cmd = ("python -c "
-                          "'import sys,base64; "
-                          "sys.stdout.write(base64.b64decode(sys.stdin.read()))'")
-        else:
-            # Two very different things reach here. DETECT_MARKER present means
-            # the device answered and genuinely has no decoder — a property of
-            # that device, which retrying will not change. Absent means the
-            # round trip produced nothing in 15s, i.e. the shell plane is not
-            # carrying output, which is a link problem and IS worth retrying.
-            # Reporting both as "no base64 decoder" sent #121 looking at the
-            # wrong half.
-            if DETECT_MARKER not in detect_buf:
-                log.error(f"[api] Shell produced no output in 15s while probing "
-                          f"{device_id} for a decoder — link problem, not a "
-                          f"missing tool. Output so far: {detect_buf!r}")
-                return _transfer_failed(
-                    "shell", "device shell produced no output within 15s")
+        decision = em_decoder.decide_decoder(detect_buf, DETECT_MARKER)
+        if decision.failure == "link":
+            log.error(f"[api] Shell produced no output in 15s while probing "
+                      f"{device_id} for a decoder — link problem, not a "
+                      f"missing tool. Output so far: {decision.detail!r}")
+            return _transfer_failed(
+                "shell", "device shell produced no output within 15s")
+        if decision.failure == "decoder":
             log.error(f"[api] No base64 decoder found on device. "
-                      f"Detection output: {detect_buf!r}")
+                      f"Detection output: {decision.detail!r}")
             return _transfer_failed("decoder")
+        decode_cmd = decision.decode_cmd
 
         log.info(f"[api] Decoder: {decode_cmd.split()[0]} {decode_cmd.split()[1]}")
 
-        if "MD5:busybox" in detect_buf:
-            md5_cmd = "busybox md5sum"
-        elif "MD5:plain" in detect_buf:
-            md5_cmd = "md5sum"
-        else:
-            md5_cmd = None
+        md5_cmd = em_decoder.decide_md5(detect_buf)
+        if md5_cmd is None:
             if require_verify:
                 log.error(f"[api] No md5 tool on device — refusing to transfer "
                           f"{dest} unverified. Detection output: {detect_buf!r}")

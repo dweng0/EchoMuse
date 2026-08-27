@@ -1,9 +1,34 @@
 # Crown owns the audio hardware exclusively (for now)
 
+**Status, 2026-08-27: the speaker half of this ADR is superseded by
+implementation. The mic half still stands as written.** Continuous concurrent
+use of the device as an ordinary Android tablet (browser audio, etc.)
+alongside the raw-ALSA exclusive grab this ADR describes hard-froze the whole
+board — not just the daemon, the SoC — documented in
+`docs/echo-show-8-audio-freeze-handoff.md` and root-caused via pstore in
+`docs/echo-show-8-journal.md` (2026-08-26). The fix
+(`docs/echo-show-8-audiotrack-design.md`, commits `af0b000`/`dfb773b`) routes
+playback through a real Android `AudioTrack` instead, via a socket to
+`crown_launcher`'s `PlaybackServer` — deliberately the opposite of "exclusive
+and direct" for exactly the reason this ADR gave for not doing that (avoiding
+weeks of NDK binding work) turned out not to be the deciding cost once a
+freeze was on the table. `AudioFocus` ducking (`bb80677`) replaced the
+turn-ownership model described below for the speaker.
+
+The mic still does the raw-ALSA exclusive grab described here, unmodified,
+and the same class of collision is the leading (unconfirmed) hypothesis for
+an open bug — mic frames never reaching the controller at all — see
+`docs/echo-show-8-journal.md`'s final entry. If that hypothesis holds, the
+mic side of this ADR will need the same reversal the speaker side already
+got; this file should be revisited then rather than treated as settled.
+
 On the Crown (Echo Show 8 on LineageOS) EchoMuse seizes the microphone and
 speaker hardware directly and exclusively — exactly as the Biscuit does — rather
 than routing through Android's audio system so other apps can share the sound
 devices. Sharing is deferred as a possible later phase.
+
+**(Original ADR text follows, describing the design as first built. See the
+status note above for what has since changed.)**
 
 ## Why
 

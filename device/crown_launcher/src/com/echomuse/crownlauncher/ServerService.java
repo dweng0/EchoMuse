@@ -7,6 +7,7 @@ import android.app.Service;
 import android.content.Intent;
 import android.os.Build;
 import android.os.IBinder;
+import android.util.Log;
 
 import java.io.File;
 import java.io.IOException;
@@ -22,11 +23,13 @@ import java.io.IOException;
  * same reasoning as the .rc file: one dev unit, no fleet yet to need it.
  */
 public class ServerService extends Service {
+    private static final String TAG = "EchoMuseServerService";
     private static final String CHANNEL_ID = "echomuse_crown";
     private static final String BINARY = "/data/local/bin/server";
     private static final String LOG_FILE = "/data/local/tmp/echomuse.log";
 
     private Process proc;
+    private volatile boolean stopping = false;
     private PlaybackServer playbackServer;
     private Thread playbackThread;
     private StatusOverlay statusOverlay;
@@ -60,11 +63,43 @@ public class ServerService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
+        // Found in review 2026-08-27: this exec'd child was never watched.
+        // START_STICKY only tells Android to restart the SERVICE if the OS
+        // kills its process — it does nothing when the CHILD process this
+        // service exists to run dies on its own (crash, `kill`, anything).
+        // Without this, the service sits there looking alive (notification
+        // still reads "running", the playback/overlay sockets still
+        // listening for a daemon that's gone) with nothing restarting it
+        // and nothing even logging that it died. waitFor() blocks, so it
+        // runs on its own thread; stopSelf() on exit is what makes
+        // START_STICKY's restart actually apply to the daemon again, not
+        // just to this already-running service.
+        final Process watchedProc = proc;
+        new Thread(new Runnable() {
+            @Override public void run() {
+                int exitCode;
+                try {
+                    exitCode = watchedProc.waitFor();
+                } catch (InterruptedException e) {
+                    return;
+                }
+                if (stopping) return; // onDestroy()'s own proc.destroy() — expected
+                Log.w(TAG, "daemon exited (code=" + exitCode + ") — restarting service "
+                        + "so Android's START_STICKY brings it back");
+                stopSelf();
+            }
+        }, "echomuse-daemon-watch").start();
         return START_STICKY;
     }
 
     @Override
     public void onDestroy() {
+        // Set BEFORE destroy() so the watcher thread's waitFor() (which
+        // destroy() itself unblocks, normally, not via InterruptedException)
+        // can tell "we did this on purpose" from "the daemon actually died"
+        // and skip logging a restart that's already happening for another
+        // reason.
+        stopping = true;
         if (proc != null) {
             proc.destroy();
         }

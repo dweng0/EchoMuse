@@ -8,12 +8,14 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.RectF;
+import android.net.Credentials;
 import android.net.LocalServerSocket;
 import android.net.LocalSocket;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.os.Process;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
@@ -72,6 +74,12 @@ class StatusOverlay implements Runnable {
 
     private volatile boolean running = true;
     private LocalServerSocket serverSocket;
+    // Tracked so stop() can close it directly. Found in review 2026-08-27:
+    // closing only serverSocket unblocks a thread parked in accept(), but
+    // one instead blocked inside handleConnection()'s in.readLine() (daemon
+    // connected but between messages) was never woken — a stale thread and
+    // its socket leaking past every stop()/restart cycle.
+    private volatile LocalSocket currentClient;
     private WindowManager windowManager;
     private TopBarView topBarView;
     private PowerManager.WakeLock wakeLock;
@@ -85,6 +93,10 @@ class StatusOverlay implements Runnable {
         running = false;
         try {
             if (serverSocket != null) serverSocket.close();
+        } catch (IOException ignored) {
+        }
+        try {
+            if (currentClient != null) currentClient.close();
         } catch (IOException ignored) {
         }
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
@@ -131,12 +143,34 @@ class StatusOverlay implements Runnable {
                 if (running) Log.w(TAG, "accept failed: " + e);
                 continue;
             }
+            // Same reasoning as PlaybackServer's identical check: an
+            // abstract-namespace socket has no filesystem permission bits,
+            // so anything on the device can connect. This one only lets a
+            // connected peer toggle LED colour / hold a wake lock, lower
+            // stakes than hijacking audio, but still no reason to accept it
+            // from anything but the daemon (which always runs as this
+            // app's own uid).
+            try {
+                Credentials creds = client.getPeerCredentials();
+                if (creds.getUid() != Process.myUid()) {
+                    Log.w(TAG, "rejecting connection from uid " + creds.getUid()
+                            + " (expected " + Process.myUid() + ")");
+                    try { client.close(); } catch (IOException ignored) { }
+                    continue;
+                }
+            } catch (IOException e) {
+                Log.w(TAG, "could not read peer credentials, rejecting: " + e);
+                try { client.close(); } catch (IOException ignored) { }
+                continue;
+            }
             Log.i(TAG, "daemon connected");
+            currentClient = client;
             try {
                 handleConnection(client);
             } catch (IOException e) {
                 Log.w(TAG, "connection ended: " + e);
             } finally {
+                currentClient = null;
                 try {
                     client.close();
                 } catch (IOException ignored) {

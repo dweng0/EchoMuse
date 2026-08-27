@@ -749,7 +749,18 @@ function ScreenRing({ state, size = 120 }) {
 // shape; an unknown/never-connected device falls back to the ring, same as
 // today.
 function DeviceIcon({ device, state, size }) {
-  const isScreen = /echo show/i.test(device?.model || '');
+  // Capability-driven when the device is actually connected — ADR-0003 is
+  // explicit that the model string is decorative and nothing should branch
+  // on it, and this used to (a straight `/echo show/i` regex against
+  // `device.model`, found in review 2026-08-27). The model string is kept
+  // as a fallback ONLY for a device that isn't currently live: `capabilities`
+  // comes back as an empty array whenever `connected` is false (em_api.py's
+  // serialization), so there's nothing capability-shaped to check for an
+  // offline device, and the whole reason `model` is persisted (em_db v20)
+  // is so an offline device still gets the right icon shape.
+  const isScreen = device?.connected
+    ? (device.capabilities || []).includes('display')
+    : /echo show/i.test(device?.model || '');
   return isScreen
     ? <ScreenRing state={state} size={size}/>
     : <LedRing state={state} size={size}/>;
@@ -2602,6 +2613,7 @@ const _ADB = (() => {
       for (let i = 0; i < bin.length; i++) buffer[i] = bin.charCodeAt(i);
       yield { buffer, name: 'echomuse-dashboard' };
     }
+    clear() { localStorage.removeItem(this._key); }
   }
   // One store for the whole browser session (module scope, not per-Client) —
   // requestDevice and reconnectSilent both authenticate against the SAME key,
@@ -2631,7 +2643,7 @@ const _ADB = (() => {
     return new Client(adb, transport, banner, usbDevice.serial ?? null);
   }
 
-  return { Client };
+  return { Client, clearStoredKey: () => _credentialStore.clear() };
 })();
 
 // ── AddDeviceTile ──

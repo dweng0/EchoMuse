@@ -6,8 +6,10 @@ import android.media.AudioFocusRequest;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioTrack;
+import android.net.Credentials;
 import android.net.LocalServerSocket;
 import android.net.LocalSocket;
+import android.os.Process;
 import android.util.Log;
 
 import java.io.IOException;
@@ -69,6 +71,10 @@ class PlaybackServer implements Runnable {
 
     private volatile boolean running = true;
     private LocalServerSocket serverSocket;
+    // Tracked so stop() can close it directly — see StatusOverlay's
+    // identical field for why (closing only serverSocket doesn't wake a
+    // thread parked reading mid-connection, found in review 2026-08-27).
+    private volatile LocalSocket currentClient;
 
     PlaybackServer(Context context) {
         audioManager = context.getSystemService(AudioManager.class);
@@ -78,6 +84,10 @@ class PlaybackServer implements Runnable {
         running = false;
         try {
             if (serverSocket != null) serverSocket.close();
+        } catch (IOException ignored) {
+        }
+        try {
+            if (currentClient != null) currentClient.close();
         } catch (IOException ignored) {
         }
     }
@@ -100,12 +110,36 @@ class PlaybackServer implements Runnable {
                 if (running) Log.w(TAG, "accept failed: " + e);
                 continue;
             }
+            // Abstract-namespace sockets carry no filesystem permission
+            // bits at all (the whole reason this socket uses one — see the
+            // class comment), so anything on the device can connect here.
+            // The daemon always runs as THIS app's own uid (exec'd child
+            // inherits it), so that's the one peer this socket should ever
+            // accept — found in review 2026-08-27: an unchecked accept
+            // meant any other installed app could hijack playback (inject
+            // arbitrary PCM, or just deny the real daemon's audio) with no
+            // root needed.
+            try {
+                Credentials creds = client.getPeerCredentials();
+                if (creds.getUid() != Process.myUid()) {
+                    Log.w(TAG, "rejecting connection from uid " + creds.getUid()
+                            + " (expected " + Process.myUid() + ")");
+                    try { client.close(); } catch (IOException ignored) { }
+                    continue;
+                }
+            } catch (IOException e) {
+                Log.w(TAG, "could not read peer credentials, rejecting: " + e);
+                try { client.close(); } catch (IOException ignored) { }
+                continue;
+            }
             Log.i(TAG, "daemon connected");
+            currentClient = client;
             try {
                 handleConnection(client);
             } catch (IOException e) {
                 Log.w(TAG, "connection ended: " + e);
             } finally {
+                currentClient = null;
                 try {
                     client.close();
                 } catch (IOException ignored) {
