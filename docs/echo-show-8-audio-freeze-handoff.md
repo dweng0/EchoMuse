@@ -1,8 +1,8 @@
 # crown audio freeze — handoff (2026-08-26)
 
 Written for picking this back up cold. Read `docs/echo-show-8-hardware-map.md`
-and the 2026-08-26 entries in `JOURNAL.md` first — this doc assumes that
-context and only covers the freeze investigation in detail.
+and the 2026-08-26 entries in `docs/echo-show-8-journal.md` first — this doc
+assumes that context and only covers the freeze investigation in detail.
 
 ## The problem, one line
 
