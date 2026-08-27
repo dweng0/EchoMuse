@@ -4231,6 +4231,7 @@ async def _post_provision_diagnostics(request: web.Request) -> web.Response:
         # WPA3" is the whole answer on a #82-shaped failure.
         selected_ssid=body.get("selected_ssid") or None,
         controller_version=CONTROLLER_VERSION,
+        platform=body.get("platform") or "biscuit",
     )
     stamp = time.strftime("%Y%m%d-%H%M%S")
     return web.Response(
