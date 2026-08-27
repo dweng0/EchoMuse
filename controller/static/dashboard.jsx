@@ -5179,6 +5179,18 @@ function CrownProvisionWizard({ token, onClose, knownDevices }) {
   // No reboot: unlike biscuit's last step, nothing here needs one, and there
   // is no A/B slot story yet to make one meaningful.
   async function runStartLauncher(c) {
+    // Found live on the first real wizard run against a factory-reset unit:
+    // ServerService execs the daemon as the app's OWN sandboxed uid, never
+    // root, and on a fresh device /data/local/tmp is drwxrwx--x — the app has
+    // EXECUTE on the directory (enough to open an existing file) but not
+    // WRITE (not enough to CREATE one). ProcessBuilder.start()'s log
+    // redirect then throws, caught silently — no crash, no log line, the
+    // launcher app itself stays alive (its playback/overlay sockets still
+    // come up) so nothing visible says the daemon never started. Creating
+    // the file here first sidesteps it: opening an EXISTING file for write
+    // needs only directory search/execute, which the app already has. See
+    // docs/echo-show-8-journal.md's 2026-08-27 entry for the full story.
+    await c.shell('touch /data/local/tmp/echomuse.log && chmod 666 /data/local/tmp/echomuse.log');
     await c.shell('am start-foreground-service -n com.echomuse.crownlauncher/.ServerService');
     addLog('Launcher started — clears the "stopped" state permanently, so a real reboot will '
          + 'autostart from here on.', 'ok');

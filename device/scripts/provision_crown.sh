@@ -116,15 +116,39 @@ echo "-- granting SYSTEM_ALERT_WINDOW (status strip overlay)"
 adb shell appops set "$LAUNCHER_PKG" SYSTEM_ALERT_WINDOW allow >/dev/null
 echo "   done"
 
+echo "-- pre-creating the daemon log file (writable by the app's own uid)"
+# ServerService execs the daemon as ITS OWN sandboxed app uid (u0_a147-ish),
+# never root, and redirects stdout to this path via ProcessBuilder. On a
+# device fresh from a factory reset, /data/local/tmp is `drwxrwx--x
+# root:shell` (or shell:shell) — the app uid has EXECUTE on that directory
+# (enough to open a file that already exists) but NOT WRITE (not enough to
+# CREATE one). ProcessBuilder.start() then throws IOException, caught
+# silently by `catch (IOException e) { stopSelf(); }` — no crash, no log
+# line, the launcher app itself keeps running (its playback/overlay sockets
+# still come up), so `ps` shows the app alive and NOTHING else says the
+# daemon never started. Verified live 2026-08-27 on a freshly-reset unit:
+# the log file didn't exist at all after "successful" provisioning, and
+# creating it here (existing-file writes don't need directory WRITE
+# permission, only directory search/execute, which the app already has)
+# fixed it outright — daemon started and registered within 2 seconds.
+# Every previous test unit had this permission loosened by hand at some
+# point and nobody had provisioned a truly fresh device through this exact
+# path before.
+adb shell "touch /data/local/tmp/echomuse.log && chmod 666 /data/local/tmp/echomuse.log"
+echo "   done"
+
 echo "-- clearing Android's 'stopped' state + starting now"
 # A freshly-installed app that has never been run sits in the "stopped"
 # package state, and Android withholds implicit broadcasts — including
 # BOOT_COMPLETED — from stopped apps (measured live 2026-08-26: installed,
-# rebooted, nothing started). `am start-service` both clears that state
-# permanently and starts the service immediately, so this one command
-# replaces the old raw `setsid exec` line AND fixes the thing that made the
-# APK approach not work on a first install.
-adb shell am start-service -n "$LAUNCHER_SVC" >/dev/null
+# rebooted, nothing started). Plain `am start-service` hits "Error: app is
+# in background uid null" on such a device (the same background-start
+# restriction a real Context.startService() call faces from Android 8+);
+# `am start-foreground-service` is the shell equivalent of
+# startForegroundService, which both clears the stopped flag permanently
+# AND starts the service immediately, matching the 2026-08-26 finding this
+# script had drifted from.
+adb shell am start-foreground-service -n "$LAUNCHER_SVC" >/dev/null
 echo "   started — tail /data/local/tmp/echomuse.log on-device, or:"
 echo "     adb shell tail -f /data/local/tmp/echomuse.log"
 
