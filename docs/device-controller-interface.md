@@ -303,14 +303,16 @@ paths, autostart — lives in
 [echo-show-8-hardware-map.md](echo-show-8-hardware-map.md); this section records
 only what the *interface* commits to for MVP.
 
-**Capabilities for MVP** (subset of the Dot's):
+**Capabilities for MVP** (mostly a subset of the Dot's — `display` is crown-only, the Dot has no screen):
 
 | Capability | crown MVP | Note |
 |------------|-----------|------|
 | `speaker` | yes | `card0,device0` → RT5616 (issue #5). Streams clean, but `Ext_Speaker_Amp_Switch` is inverted (`On`=silent, `Off`=audible) — same trap as checkers, confirmed by ear 2026-08-26. Must be driven `Off` in the binding's init; the boot default is `On` |
 | `mic` | **proven** | `card0,device22`, 6ch/16kHz/`S24_3LE`, confirmed by capture on real hardware 2026-08-26 — real signal, not digital zeros. HW_REFINE matches checkers' driver constants exactly. Open: quiet-room/across-room SNR, not raw capture — see below |
 | `buttons` | yes | Resolved by name (`gpio-keys` vol, action button, camera shutter) |
-| `leds` / `led_anim` | **no** | No LED ring; a "voice turn" status overlay on the display is deferred past MVP and even then stays out of the user's way |
+| `leds` | **yes** | No physical ring, but the string stays on: `StatusOverlay` (in `crown_launcher`) renders the listening-ring hint as a status strip along the screen's top edge, so the wake cue still has something to paint with |
+| `led_anim` | no | No ring for a local animation engine to spin frames for |
+| `display` | **yes** | Tells the controller this device has a screen so the dashboard can draw a screen-bodied device icon (`dashboard.jsx`'s `DeviceIcon`) — never inferred from the decorative model string |
 | `audio_mix` | **yes** (2026-08-27) | Announced now that it's confirmed implemented — `pcm_speaker_crown.go` carries the same two-plane mixer as biscuit, just wasn't advertised; music ducks under a voice turn on real hardware, verified live |
 | `ambient_light` | tbd | Only if a readable sensor is found |
 | `oww_shadow` / `oww_trigger` | no (MVP) | MVP uses **controller-side** wake word |

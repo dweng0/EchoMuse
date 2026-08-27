@@ -3,9 +3,9 @@
 # and wires up autostart, in one pass.
 #
 # Deliberately a single script rather than a manual step sequence, so a
-# future dashboard wizard (docs/echo-show-8-plan.md, "Later / nice-to-have")
-# can shell out to this exact thing and stream its stdout, the same relation
-# the existing wizard has to device_payloads/start_server.sh for biscuit.
+# future dashboard wizard can shell out to this exact thing and stream its
+# stdout, the same relation the existing wizard has to
+# device_payloads/start_server.sh for biscuit.
 # Every step below prints one line before and one after, on purpose, for
 # that streaming case — don't collapse them into a single silent block.
 #

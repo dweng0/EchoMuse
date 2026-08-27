@@ -4,9 +4,8 @@ package client
 
 // crownMic is the mic-pipeline stand-in for crown: no beamformer, because
 // there is no perimeter array to steer (4 real capsules across two dies,
-// not biscuit's 6-around-1-centre geometry) and the plan is explicitly
-// single-channel for MVP (docs/echo-show-8-plan.md, Phase 2). It always
-// extracts the same fixed channel and never reports a direction.
+// not biscuit's 6-around-1-centre geometry), so MVP stays single-channel.
+// It always extracts the same fixed channel and never reports a direction.
 //
 // The extraction math (24-bit sign-extend, Q12 fixed-point gain, clamp to
 // int16 and count clips) is copied from beamformer.extractChannel rather

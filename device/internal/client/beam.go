@@ -4,10 +4,9 @@ package client
 // selection stage. biscuit's *beamformer.Beamformer implements it directly
 // (7-mic perimeter array, energy-onset steering — see internal/beamformer's
 // package comment). crown's mic is a different shape entirely: 6 channels,
-// 4 real capsules across two dies with no perimeter geometry to steer, and
-// the plan is explicitly single-channel/no-beamforming for MVP (docs/
-// echo-show-8-plan.md, Phase 2) — so it gets a plain channel extractor
-// instead (beam_crown.go).
+// 4 real capsules across two dies with no perimeter geometry to steer, so
+// MVP stays single-channel/no-beamforming — it gets a plain channel
+// extractor instead (beam_crown.go).
 //
 // This interface exists so data.go's mic pipeline — the most delicate hot
 // loop in the binary, with its own concurrency comments about Lock/Process

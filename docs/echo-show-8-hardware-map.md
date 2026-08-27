@@ -317,7 +317,7 @@ Wake word renamed to "Winston" for this test. Result: **wake → controller
 OWW detection → HA Assist pipeline → STT → TTS → spoken reply through
 crown's own speaker, repeatedly**, including a mid-reply barge-in that
 correctly cancelled and started an interrupting turn. This is the MVP
-acceptance bar from `docs/echo-show-8-plan.md` Phase 2, met.
+acceptance bar (boot → connect → HA → wake → Assist → spoken reply), met.
 
 Five manual trials, saying "Winston, what is the time" once each, scores
 pulled from the controller log (threshold 0.500):

@@ -4,9 +4,8 @@
 # start_server.sh carries all three because it survives a fielded OTA
 # pipeline. crown has none of that yet (manual adb bring-up, one dev unit),
 # so this is deliberately just "exec the binary, let init restart it if it
-# dies" (docs/echo-show-8-plan.md Phase 1/3; decided 2026-08-26 rather than
-# porting start_server.sh's full shape ahead of there being a fleet to need
-# it for).
+# dies" (decided 2026-08-26 rather than porting start_server.sh's full
+# shape ahead of there being a fleet to need it for).
 #
 # No `oneshot`: that flag means the OPPOSITE of what it sounds like for this
 # purpose — it tells init NOT to restart the service when it exits. Default
