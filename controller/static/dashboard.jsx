@@ -2527,7 +2527,7 @@ const _ADB = (() => {
         _lastUsbDevice = null;
       }
 
-      logFn('Requesting USB device — select the Echo Dot from the picker…');
+      logFn('Requesting USB device — select the device from the picker…');
       const usbDevice = await manager.BROWSER.requestDevice();
       if (!usbDevice) throw new Error('No device selected.');
       logFn(`Device selected: ${usbDevice.name ?? usbDevice.serial ?? 'unknown'}`);
@@ -2567,6 +2567,48 @@ const _ADB = (() => {
     }
   }
 
+  // ADB's RSA keypair store — `Transport.authenticate` needs one and throws
+  // deep inside authentication ("Cannot read properties of undefined
+  // (reading 'iterateKeys')") if none is given. Found live on the first real
+  // run of this wizard against hardware: nothing in this module had ever
+  // supplied one, on either wizard, so authentication could never have
+  // succeeded here before now. @yume-chan/adb@2.1.0's contract (confirmed
+  // against its published source, not guessed at) is exactly two methods —
+  // `iterateKeys()` yields `{buffer, name}` (a PKCS#8 DER private key), and
+  // `generateKey()` makes one the first time there isn't one. localStorage is
+  // deliberately used over IndexedDB: the key only needs to survive across
+  // reconnects and page reloads in ONE browser, and this is the same
+  // trust-once model real `adb` gives every host via `~/.android/adbkey` —
+  // authorize the RSA fingerprint on the device's own screen once, then never
+  // again from that browser.
+  class _WebCredentialStore {
+    constructor(storageKey) { this._key = storageKey; }
+    async generateKey() {
+      const { privateKey } = await crypto.subtle.generateKey(
+        { name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048,
+          publicExponent: new Uint8Array([0x01, 0x00, 0x01]), hash: 'SHA-1' },
+        true, ['sign']);
+      const buffer = new Uint8Array(await crypto.subtle.exportKey('pkcs8', privateKey));
+      let bin = '';
+      for (const b of buffer) bin += String.fromCharCode(b);
+      localStorage.setItem(this._key, btoa(bin));
+      return { buffer, name: 'echomuse-dashboard' };
+    }
+    async *iterateKeys() {
+      const stored = localStorage.getItem(this._key);
+      if (!stored) return;
+      const bin = atob(stored);
+      const buffer = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) buffer[i] = bin.charCodeAt(i);
+      yield { buffer, name: 'echomuse-dashboard' };
+    }
+  }
+  // One store for the whole browser session (module scope, not per-Client) —
+  // requestDevice and reconnectSilent both authenticate against the SAME key,
+  // which is the entire point: generate it once, reuse it for every device
+  // and every reconnect from here on.
+  const _credentialStore = new _WebCredentialStore('echomuse-wizard-adbkey');
+
   // Shared by requestDevice (picker-obtained device) and reconnectSilent
   // (already-permitted device found by serial) — both need the same
   // open+authenticate+wrap sequence. _load caches after the first call, so
@@ -2580,6 +2622,7 @@ const _ADB = (() => {
       serial:         usbDevice.serial ?? 'echomuse',
       connection,
       authenticators: defaultAuths,
+      credentialStore: _credentialStore,
     });
     logFn('ADB authenticated.');
     const adb = new Adb(transport);
