@@ -242,8 +242,9 @@ to do its own job (see the direction note in the repo-root `CLAUDE.md`).
 
 ## Board profile — `crown` (Echo Show 8, 1st gen)
 
-The `crown` bindings are built behind a Go build tag mirroring `server`
-(ADR-0001). The hardware inventory — ALSA cards/devices, formats, input-device
+The `crown` bindings are built behind a Go build tag mirroring `server` — one
+binary per board, chosen at compile time, no runtime "which board am I"
+detection. The hardware inventory — ALSA cards/devices, formats, input-device
 paths, autostart — lives in
 [echo-show-8-hardware-map.md](echo-show-8-hardware-map.md); this section records
 only what the *interface* commits to for MVP.
@@ -260,7 +261,7 @@ only what the *interface* commits to for MVP.
 | `ambient_light` | tbd | Only if a readable sensor is found |
 | `oww_shadow` / `oww_trigger` | no (MVP) | MVP uses **controller-side** wake word |
 
-**Audio ownership** (ADR-0002): `crown` seizes the mic and speaker exclusively
+**Audio ownership**: `crown` seizes the mic and speaker exclusively
 while EchoMuse runs, exactly like the Dot. The mic is **held continuously** —
 MVP wake word is controller-side, so the device streams mic PCM the whole time
 or it goes deaf to the next wake word. The **speaker** is grabbed for a turn
@@ -273,8 +274,8 @@ format the Dot already captures (`device/internal/bindings/mic/pcm_microphone.go
 9ch/16000 Hz/`tinyalsa.PCM_FORMAT_S24_3LE`), just fewer channels, same
 `Channels * 3` stride, same `DeviceConfig`-driven path downstream. Proven on
 real hardware 2026-08-26 with `device/tools/capture_mics`: opens clean, real
-signal on all 4 mic channels, no digital zeros. `device/tools/hw_refine_probe`
-confirms the driver's own range matches checkers' constants exactly. Full
+signal on all 4 mic channels, no digital zeros. The driver's own HW_REFINE
+range was confirmed to match checkers' constants exactly. Full
 history (why "digital zeros" was the original wrong read, the gain-fix
 investigation, the actual capture data) is in
 [echo-show-8-hardware-map.md](echo-show-8-hardware-map.md#on-hardware-capture-2026-08-26--the-gono-go-measurement-done).

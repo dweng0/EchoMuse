@@ -802,7 +802,7 @@ MIGRATIONS: list[str] = [
     # The device's human-readable model label ("Echo Show 8 Gen 1 (crown)" /
     # "Echo Dot Gen 2 (biscuit)") was live-only (register message ->
     # device.model, never persisted) — decorative for HA's DeviceInfoResponse
-    # per ADR-0003, so that was fine there. The dashboard needs it too, to
+    # and never branched on, so that was fine there. The dashboard needs it too, to
     # pick the right device icon (a screen for crown, a ring for biscuit),
     # and a live-only value goes missing for every OFFLINE device — exactly
     # the devices a fleet page most wants to render correctly. Persisted here

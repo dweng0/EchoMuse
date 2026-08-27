@@ -34,7 +34,7 @@ func capabilities() []string {
 	return caps
 }
 
-// modelName is decorative (ADR-0003) — a human-readable label for the
+// modelName is decorative, never branched on — a human-readable label for the
 // physical board, never branched on. Kept beside capabilities() since it's
 // the same per-board-file split for the same reason (host tests build with
 // no tag at all, so biscuit has to stay the default here too).

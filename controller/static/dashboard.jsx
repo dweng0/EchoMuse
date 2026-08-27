@@ -749,8 +749,8 @@ function ScreenRing({ state, size = 120 }) {
 // shape; an unknown/never-connected device falls back to the ring, same as
 // today.
 function DeviceIcon({ device, state, size }) {
-  // Capability-driven when the device is actually connected — ADR-0003 is
-  // explicit that the model string is decorative and nothing should branch
+  // Capability-driven when the device is actually connected — the model
+  // string is decorative throughout this codebase and nothing should branch
   // on it, and this used to (a straight `/echo show/i` regex against
   // `device.model`, found in review 2026-08-27). The model string is kept
   // as a fallback ONLY for a device that isn't currently live: `capabilities`

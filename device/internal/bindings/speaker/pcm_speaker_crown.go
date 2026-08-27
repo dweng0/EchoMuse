@@ -11,8 +11,7 @@ import (
 )
 
 // crown: speaker is card0,device0 (MultiMedia1_Playback -> RT5616), measured
-// working 2026-08-26 via device/tools/aec_probe. See
-// docs/echo-show-8-hardware-map.md.
+// working 2026-08-26. See docs/echo-show-8-hardware-map.md.
 const cardNr = 0
 const deviceNr = 0
 

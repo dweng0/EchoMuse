@@ -78,5 +78,5 @@ for c in range(channels):
 ```
 
 A channel reading exact 0 (not just quiet) across the whole capture is a real
-signal-path problem, not noise — see the aec_probe README for the follow-up
-that distinguishes "unused slot" from "reference channel."
+signal-path problem, not noise — worth distinguishing "unused slot" from
+"reference channel" before assuming a bad capsule.

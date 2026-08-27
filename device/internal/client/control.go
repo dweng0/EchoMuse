@@ -266,7 +266,7 @@ func (c *ControlClient) connect(ctx context.Context, server *discovery.ServerInf
 		// device shows "needs newer firmware" rather than a toggle that
 		// silently does nothing.
 		"capabilities": capabilities(),
-		// Decorative only (ADR-0003) — nothing on either side ever branches on
+		// Decorative only — nothing on either side ever branches on
 		// this string, it exists so a human looking at Home Assistant's device
 		// page can tell which physical board answered. Absent on older
 		// firmware; the controller falls back to its own default rather than
@@ -739,9 +739,8 @@ func (c *ControlClient) runShellSession(ctx context.Context, baseURL string, pty
 // capabilities is per-board: see capabilities_server.go (biscuit) and
 // capabilities_crown.go. Negotiated by capability rather than by version so
 // the controller needs no knowledge of release history (see CLAUDE.md) or of
-// which board this is (ADR-0003) — every board's list is a fresh, honest
-// statement of what its own bindings implement, not a subset carved out of
-// biscuit's.
+// which board this is — every board's list is a fresh, honest statement of
+// what its own bindings implement, not a subset carved out of biscuit's.
 
 func (c *ControlClient) SendButton(event buttons.ButtonClickEvent) {
 	log.Printf("[control] SendButton: clickType=%d down=%v heldMs=%d muted=%v", event.ClickType, event.Down, event.HeldMs, event.Muted)

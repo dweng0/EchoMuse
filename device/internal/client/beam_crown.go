@@ -22,8 +22,8 @@ type crownMic struct {
 // crownChannels/crownByteSample/crownFrameSize/crownMicChannel: crown's mic
 // is card0,device22, 6ch/16kHz/S24_3LE (docs/echo-show-8-hardware-map.md).
 // ch0 is one of the four live capsules (ch0-3; ch4/ch5 measured as idle TDM
-// slots, not a hardware AEC reference — see the hardware map's aec_probe
-// section) — picked arbitrarily among the four since MVP has no beamformer
+// slots, not a hardware AEC reference — see docs/echo-show-8-hardware-map.md)
+// — picked arbitrarily among the four since MVP has no beamformer
 // to prefer one, and revisited if it turns out to be a worse-placed capsule
 // than another.
 const (

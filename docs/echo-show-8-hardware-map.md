@@ -2,16 +2,16 @@
 
 The inventory every device **Binding** for the Show 8 depends on — the analogue
 of what `SETUP.md` records for the Echo Dot. Produced by discovery on a real
-device (issue #1). Terms in **bold** are defined in [CONTEXT.md](../CONTEXT.md).
+device (issue #1).
 
 **Device:** Amazon Echo Show 8, 1st gen (2019). SoC **MediaTek MT8163**
 (quad-core Cortex-A53). Two 2″ stereo speakers; mic array; 1MP camera with a
 physical shutter. LineageOS port codename **`crown`** (XDA unofficial).
 
 > **Codename note.** The LineageOS port and every device prop report **`crown`**
-> (`ro.product.device=crown`, `lineage_crown`). An earlier draft of the plan and
-> ADR-0001 named the build tag `hoya` — a guess, and the wrong one (`hoya` is
-> Amazon's codename for the Echo Show *5*). Reconciled: the build tag is
+> (`ro.product.device=crown`, `lineage_crown`). An earlier draft of the plan
+> named the build tag `hoya` — a guess, and the wrong one (`hoya` is Amazon's
+> codename for the Echo Show *5*). Reconciled: the build tag is
 > **`crown`** throughout, matching what the platform calls itself.
 
 ## Platform

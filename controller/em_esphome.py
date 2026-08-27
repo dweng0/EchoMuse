@@ -307,7 +307,7 @@ class EchoMuseSatellite(SatelliteServerProtocol):
         mac_address: str,
         oww_model_id: str,
         on_disconnected_cb,
-        model: str | None = None,  # decorative board label (ADR-0003)
+        model: str | None = None,  # decorative board label, never branched on
         owning_server=None,   # DeviceESPhomeServer — back-reference so the
                               # standalone-announce path can read the live
                               # _standalone_play callback rather than a
@@ -324,7 +324,7 @@ class EchoMuseSatellite(SatelliteServerProtocol):
         self.label          = label
         self.mac_address    = mac_address
         self.oww_model_id   = oww_model_id
-        # Decorative only (ADR-0003) — never branched on. Falls back to the
+        # Decorative only — never branched on. Falls back to the
         # global default for firmware that predates the field.
         self.model          = model or ESPHOME_DEVICE_MODEL
         self._owning_server  = owning_server
@@ -2016,7 +2016,7 @@ class DeviceESPhomeServer:
         # problem: HA does not reconnect on its own, so the entity stayed
         # missing for the life of the connection.
         self.capabilities: list[str] = []
-        # Decorative board label (ADR-0003) — displayed in HA's device info,
+        # Decorative board label — displayed in HA's device info,
         # never branched on. Defaults to the global fallback until the
         # device's register message arrives (or forever, on firmware that
         # predates the field) — never None, so a server built before that
@@ -2182,8 +2182,8 @@ _servers: dict[str, DeviceESPhomeServer] = {}
 # comes up once the device is present), so without this the very first
 # ListEntities — the one HA caches — is built from an empty list.
 _pending_caps: dict[str, list[str]] = {}
-# Same one-shot-race reason as _pending_caps, for the decorative model label
-# (ADR-0003): the device's register message always precedes server creation.
+# Same one-shot-race reason as _pending_caps, for the decorative model label:
+# the device's register message always precedes server creation.
 _pending_model: dict[str, str] = {}
 _azc: Optional[AsyncZeroconf] = None
 
@@ -2734,7 +2734,7 @@ def set_device_model(device_id: str, model: str | None) -> None:
     Called by em_controller when a device registers, same reason and same
     pending-dict shape as set_device_capabilities — the register message
     always precedes server creation. No entity-list race to worry about
-    here (ADR-0003: decorative only), so unlike capabilities this never
+    here (decorative only, never branched on), so unlike capabilities this never
     needs to bounce an existing HA connection.
     """
     if not model:

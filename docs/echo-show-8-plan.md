@@ -1,8 +1,7 @@
 # Plan — Echo Show 8 (Crown) support
 
 Working plan for adding Amazon Echo Show 8 (1st gen, LineageOS) support to
-EchoMuse. Terms in **bold** are defined in [CONTEXT.md](../CONTEXT.md). Key
-decisions are recorded in [docs/adr/](adr/).
+EchoMuse.
 
 ## Shape of the work
 
@@ -10,8 +9,8 @@ The controller is model-agnostic — it enables features purely from the
 **Capability** list a device announces — so it needs almost no changes. The work
 is almost entirely a second set of **Bindings** in the device firmware: reuse the
 whole **Core** (wake word, beamformer, AEC, networking, server), write fresh
-hands for the Show's hardware, gated behind a new `crown` build tag
-([ADR-0001](adr/0001-binary-per-board.md)).
+hands for the Show's hardware, gated behind a new `crown` build tag — one
+binary per board, chosen at compile time, no runtime detection.
 
 ## Phases
 
@@ -29,12 +28,12 @@ TLS/client stack unchanged. Success = the binary runs on the Show and appears as
 
 ### Phase 2 — MVP voice  ← the "works with it" milestone
 - `mic.Microphone` + `speaker.Speaker` **Bindings** against the Hardware Map,
-  **selfish grab** of the audio hardware ([ADR-0002](adr/0002-selfish-audio-grab.md)).
+  **selfish grab** of the audio hardware (exclusive, like the Dot).
 - Single mic channel, no beamforming yet.
 - Controller-side wake word (no on-device wake word yet).
 - Announce **Capabilities** `["mic","speaker"]` only.
-- Decorative model label "Echo Show 8" in the handshake
-  ([ADR-0003](adr/0003-model-label-is-decorative.md)).
+- Decorative model label "Echo Show 8" in the handshake — display only,
+  never branched on; behaviour stays capability-driven.
 - **Provisioning Script** (basic): adb-push the binary + TLS credentials and set
   auto-start, run by hand.
 
@@ -59,7 +58,7 @@ owns the screen at rest.
 ### Later / nice-to-have
 - Dashboard wizard that wraps the **Provisioning Script** and streams its output.
 - Shared audio via Android's audio system, so third-party apps can also make
-  sound (reverses the deferral in ADR-0002).
+  sound (reverses the exclusive-grab deferral above).
 
 ## Guardrails (enforced by the repo)
 - A test asserts capability strings match across the Go and Python sources — any
