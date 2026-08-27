@@ -253,10 +253,10 @@ only what the *interface* commits to for MVP.
 | Capability | crown MVP | Note |
 |------------|-----------|------|
 | `speaker` | yes | `card0,device0` → RT5616 (issue #5). Streams clean, but `Ext_Speaker_Amp_Switch` is inverted (`On`=silent, `Off`=audible) — same trap as checkers, confirmed by ear 2026-08-26. Must be driven `Off` in the binding's init; the boot default is `On` |
-| `mic` | **needs on-hardware confirmation** | Capture path exists (normal HAL/`plughw` 16 kHz mono); open question is level/SNR — see below |
+| `mic` | **proven** | `card0,device22`, 6ch/16kHz/`S24_3LE`, confirmed by capture on real hardware 2026-08-26 — real signal, not digital zeros. HW_REFINE matches checkers' driver constants exactly. Open: quiet-room/across-room SNR, not raw capture — see below |
 | `buttons` | yes | Resolved by name (`gpio-keys` vol, action button, camera shutter) |
 | `leds` / `led_anim` | **no** | No LED ring; a "voice turn" status overlay on the display is deferred past MVP and even then stays out of the user's way |
-| `audio_mix` | later | Not required for the MVP voice loop |
+| `audio_mix` | **yes** (2026-08-27) | Announced now that it's confirmed implemented — `pcm_speaker_crown.go` carries the same two-plane mixer as biscuit, just wasn't advertised; music ducks under a voice turn on real hardware, verified live |
 | `ambient_light` | tbd | Only if a readable sensor is found |
 | `oww_shadow` / `oww_trigger` | no (MVP) | MVP uses **controller-side** wake word |
 
@@ -267,23 +267,30 @@ or it goes deaf to the next wake word. The **speaker** is grabbed for a turn
 (the reply plus any media the turn asked for) and released to idle — the Alexa
 model. The screen belongs entirely to the user's own software throughout.
 
-**The mic is the MVP blocker, but narrower than first thought.** The mics sit on
-external TLV320AIC3101 dies (TDM, `card0,device22`, 6ch/16 kHz/`S24_3LE`), and a
-raw capture returns digital zeros. But the LineageOS `crown` sources already
-bring the path up: the kernel probes both AIC3101 dies, imports the DSP
-firmware, and `android_device_amazon_crown` exposes a normal `Built-In Mic` at
-16 kHz mono — so the **ordinary record path (`plughw`/`AudioRecord`) captures**,
-and the MVP binding is *capture normally → stream → controller-side wake word*,
-not a codec bring-up. The open question is **level/SNR** — but the upstream
-device tree already carries a crown-specific *"Boost built-in mic capture gain"*
-fix (2026-04-18), so a current build may already capture usably; the go/no-go is
-a one-off measurement on a recent build rather than a bring-up spike. Full
-findings and links are in
-[echo-show-8-hardware-map.md](echo-show-8-hardware-map.md#source-investigation-2026-08-24--the-mic-is-more-brought-up-than-it-looked).
-So **the `mic` capability for `crown` is provisional** pending a one-off
-on-hardware SNR measurement; the MVP milestone (boot → connect → HA → wake →
-Assist → spoken reply) depends on it. Sequence speaker (#5) before mic (#6), and
-treat #6 as "measure, then likely a DTS flag" rather than a bring-up spike.
+**The mic was the MVP blocker; it isn't any more.** The mics sit on external
+TLV320AIC3101 dies (TDM, `card0,device22`, 6ch/16 kHz/`S24_3LE`) — the same
+format the Dot already captures (`device/internal/bindings/mic/pcm_microphone.go`,
+9ch/16000 Hz/`tinyalsa.PCM_FORMAT_S24_3LE`), just fewer channels, same
+`Channels * 3` stride, same `DeviceConfig`-driven path downstream. Proven on
+real hardware 2026-08-26 with `device/tools/capture_mics`: opens clean, real
+signal on all 4 mic channels, no digital zeros. `device/tools/hw_refine_probe`
+confirms the driver's own range matches checkers' constants exactly. Full
+history (why "digital zeros" was the original wrong read, the gain-fix
+investigation, the actual capture data) is in
+[echo-show-8-hardware-map.md](echo-show-8-hardware-map.md#on-hardware-capture-2026-08-26--the-gono-go-measurement-done).
+
+**Still open: quiet-room/across-room SNR**, not raw capture — today's test was
+a loud-room sanity check with music playing, not a wake-reliability
+measurement. Speaker (#5) and mic (#6) are both proven now; SNR is the
+remaining go/no-go for the MVP milestone (boot → connect → HA → wake → Assist
+→ spoken reply).
+
+Applies to every crown binding, not just mic: resolve input devices and i2c
+addresses **by name**, never by number — `eventN` numbering isn't stable
+across boards (it's the volume button on `biscuit`, the touchscreen on
+`checkers`), and a wrong-number open fails silently rather than erroring. See
+also issue #36 (Echo Show 5 / `checkers`) — same shape of bring-up problem,
+worth reading before writing crown-specific bindings.
 
 ## Invariants (what the tests pin)
 

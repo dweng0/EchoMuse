@@ -108,7 +108,8 @@ recorded.
 ## Device/controller compatibility
 
 The two halves version independently, so any pairing can occur in the field. Two rules, both guarded by `tests/test_capabilities.py`:
-- **Negotiate by capability, not version.** The device announces what it implements in its register message (`internal/client/control.go`: `mic`, `speaker`, `leds`, `led_anim`, `buttons`, `oww_shadow`, `button_hold`, and `ambient_light` **only when the sensor is actually readable**); the controller reads `Device.capabilities` via properties like `led_anim_capable` / `oww_shadow_capable`. Never compare version strings — that puts release history in the controller and misjudges dev builds. A UI control whose feature the device lacks is shown **disabled with the reason**, never as a control that silently does nothing.
+- **Negotiate by capability, not version.** The device announces what it implements in its register message (`internal/client/control.go`, `capabilities()`: `mic`, `speaker`, `leds`, `led_anim`, `buttons`, `oww_shadow`, `oww_trigger`, `button_hold`, `audio_mix`, and `ambient_light` **only when the sensor is actually readable**); the controller reads `Device.capabilities` via properties like `led_anim_capable` / `oww_shadow_capable`. Never compare version strings — that puts release history in the controller and misjudges dev builds. A UI control whose feature the device lacks is shown **disabled with the reason**, never as a control that silently does nothing.
+  **`oww_shadow` and `oww_trigger` are two capabilities and must stay two.** Shadow shipped first, so there is firmware in the field that scores and reports but has no code to act — reading "can score" as "can trigger" stands the controller's own detection down and waits for a trigger that never comes, which presents as a device that scores perfectly and never answers. Same reason `audio_mix` is announced rather than assumed: without it the controller must keep the pause/resume path, because a device that cannot mix simply never plays the `0x04` stream.
 - **Degrade to old behaviour, never to a wrong answer.** Unknown JSON fields and message types are ignored both ways. Where a new field records a measurement, absence stores as **NULL, not 0** — old firmware reporting no `playback_stats` must not read as "zero underruns", and a device that cannot score wake words locally must not read as "scored and missed" (hence `turns.dev_shadow` alongside `dev_wake_score`).
 
 ## Versioning / releases
@@ -140,6 +141,14 @@ The controller's own version is resolved by `controller/version.py` (env `EM_CON
 
 ### Device → Controller protocol
 
+**The full wire contract is `docs/device-controller-interface.md`** (#347,
+@dweng0) — every `/control` message both ways, the `/data` frame codes and
+their direction-namespacing, config-push semantics, link auth, and the exact
+capability list. It is written for someone building a device binary for a NEW
+board against a specification rather than by reading `biscuit`'s source, and
+it was more accurate about our own capability list than this file was. Keep
+the summary below as a summary; put detail there.
+
 Each device opens **three** WebSocket connections to the controller:
 
 | Path | Direction | Purpose |
@@ -157,6 +166,8 @@ All three WS planes exist twice: plain on `SERVER_PORT` (8767) and TLS on `SERVE
 Device behaviour (`tlscreds.go`): credentials live at `/data/local/etc/echomuse/{ca.pem,token}` (canonical path constant: `em_api.DEVICE_TLS_DIR`) and are **re-read on every dial**, so a push takes effect on the next reconnect, no restart. CA present + `tls_port` mDNS TXT property → dial wss; CA present but no TXT → plain with a warning (deliberate rollout fallback). The token rides as `X-EM-Token` on all three dials.
 
 Controller enforcement (`em_linkauth.decide`, called by `_link_auth_ok`): presented-but-wrong token always rejects; stored-token-but-none-presented is allowed (the credential push itself rides the plain shell plane, and rejecting there would deadlock the rollout); a token presented for a device with NOTHING on record is **ignored, not rejected**. Rejecting it made deleting a device a one-way door, since delete takes the token with the row while the device keeps re-reading its credential file, and the refusal covered the shell plane the controller would have fixed it over. It also bought nothing: a connection presenting no token at all is already allowed, so an attacker just omits the header. `REQUIRE_DEVICE_TLS=1` flips the posture to TLS+token mandatory and is unaffected by that: a deleted device is still refused there and needs credentials pushed over USB. Flip it only when every device shows `wss (TLS)` in the dashboard (Status tab "Link" row; `linkTls` in `/api/devices`).
+
+**Deleting a device must also close its control plane, and `_delete_device` does.** Link auth is decided ONCE, at register time, so removing the row does nothing to the socket a connected device is already on: it vanishes from the dashboard and carries on serving turns, holding its ESPHome port and wake-listening, and only comes back as pending when something else drops the link. The tell is `sqlite3.IntegrityError: FOREIGN KEY constraint failed` in `db.log_device` every time the orphan relays a log line — `device_logs` references `devices(device_id)` and the parent is gone — which is how this was found on the live EA controller, 2026-08-27, a device deleted five minutes earlier and still perfectly connected. The bounce goes **after** the row is deleted: the device redials in 5s, and closing first races the redial against the delete.
 
 Credential delivery: the provisioning wizard installs credentials over adb pre-first-contact (`POST /api/provision/tls_credentials` mints the token + pending device row from the serial); already-fleet devices get the dashboard **Secure link** action (`POST /api/devices/{id}/secure_link` — shell-plane file push, then a connection bounce to redial over wss).
 

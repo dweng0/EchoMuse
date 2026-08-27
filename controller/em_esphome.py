@@ -86,6 +86,7 @@ import em_recordings
 import em_runbarrier
 import em_oww_models
 import em_player
+import em_timers
 import em_turnclock
 import em_volume
 
@@ -270,10 +271,16 @@ _MP_STATE = {
 # Voice assistant feature flags advertised to HA.
 # ANNOUNCE is required to trigger VoiceAssistantConfigurationRequest
 # (see session handoff finding #3).
+# TIMERS makes HA route "set a timer" intents here and push timer state as
+# VoiceAssistantTimerEventResponse events — the satellite rings on FINISHED
+# (see em_timers / _on_timer_event). The alert is entirely controller-side
+# (chime over the speaker plane + LED pulse), so this needs no firmware
+# support and works across the whole fleet.
 VOICE_ASSISTANT_FLAGS = int(
     VoiceAssistantFeature.VOICE_ASSISTANT
     | VoiceAssistantFeature.API_AUDIO
     | VoiceAssistantFeature.ANNOUNCE
+    | VoiceAssistantFeature.TIMERS
 )
 
 # VoiceAssistantRequest flags=0 means "device already detected wake word,
@@ -321,6 +328,21 @@ class EchoMuseSatellite(SatelliteServerProtocol):
         # global default for firmware that predates the field.
         self.model          = model or ESPHOME_DEVICE_MODEL
         self._owning_server  = owning_server
+        # Strong references to in-flight timer-event tasks (see the
+        # VoiceAssistantTimerEventResponse branch).
+        self._timer_tasks: set = set()
+
+        def _log_timer_task_error(task, _dev=device_id) -> None:
+            """Surface a failed timer-event task instead of losing it to GC."""
+            if task.cancelled():
+                return
+            exc = task.exception()
+            if exc is not None:
+                log.error(
+                    f"[esphome.{_dev[-8:]}] timer event handler failed: {exc!r}",
+                    exc_info=exc,
+                )
+        self._log_timer_task_error = _log_timer_task_error
 
         # Set on the base class so connection_lost dispatches back to
         # DeviceESPhomeServer for claimant cleanup.
@@ -342,6 +364,9 @@ class EchoMuseSatellite(SatelliteServerProtocol):
         # different things to find in the stats, and recording all of them
         # as "cancelled" loses the distinction the field is read for.
         self._turn_end_reason: Optional[str] = None
+        # Set when this turn's transcript dismissed a ringing alarm locally —
+        # suppresses HA's "there are no timers" reply for that turn.
+        self._dismissed_alarm   = False
         self._tts_audio_url:    Optional[str] = None
         self._tts_audio_data:   Optional[bytes] = None
         self._tts_event         = asyncio.Event()
@@ -354,6 +379,10 @@ class EchoMuseSatellite(SatelliteServerProtocol):
         # see _handle_voice_event's RUN_END branch).
         self._intent_ended      = False
         self._run_started       = False
+        # Whether HA has told us this run is over. A run we started
+        # that has not finished is still emitting onto this socket,
+        # and its tail belongs to no turn but this one.
+        self._run_finished      = False
         self._ha_never_started  = False
         # Barge-in run serialisation — the protocol has no run id, so the
         # satellite is what keeps two runs from overlapping on one connection.
@@ -646,6 +675,30 @@ class EchoMuseSatellite(SatelliteServerProtocol):
             yield _HANDLED
             return
 
+        if isinstance(msg, api_pb2.VoiceAssistantTimerEventResponse):
+            # HA owns the countdown; we only track live timers and ring on
+            # FINISHED. Fire-and-forget to the owning server so a slow ring
+            # (which plays audio) never blocks the protocol read loop.
+            if self._owning_server is not None:
+                # Keep a reference and report failures: asyncio holds only a
+                # WEAK reference to a bare task, and an unretrieved exception
+                # on one is invisible until GC. Both make a ring that never
+                # happens indistinguishable from an event that never arrived.
+                task = asyncio.create_task(
+                    self._owning_server.on_timer_event(
+                        event_type=int(msg.event_type),
+                        timer_id=msg.timer_id,
+                        name=msg.name,
+                        total_seconds=int(msg.total_seconds),
+                        seconds_left=int(msg.seconds_left),
+                    )
+                )
+                self._timer_tasks.add(task)
+                task.add_done_callback(self._timer_tasks.discard)
+                task.add_done_callback(self._log_timer_task_error)
+            yield _HANDLED
+            return
+
         if isinstance(msg, api_pb2.VoiceAssistantAnnounceRequest):
             # HA-initiated announcement (setup wizard audio test, or TTS push).
             #
@@ -744,9 +797,48 @@ class EchoMuseSatellite(SatelliteServerProtocol):
         elif event_type == ET.VOICE_ASSISTANT_STT_END:
             text = data.get("text", "")
             log.info(f"[{self._log_name}] STT result: {text!r}")
+            # HA has final text, so no further microphone audio can change
+            # this turn — stop feeding it, the same "HA is done" shape the
+            # RUN_END-without-RUN_START and ERROR paths already use.
+            #
+            # Without this the only exits left are the device's own VAD
+            # sentinel and the 20s hard cap, and once speech_seen is true
+            # em_turnclock deliberately stops closing the turn (HA's VAD owns
+            # end-of-turn from that point). In a room with background noise
+            # the device's RMS gate need not reclose, so a turn whose answer
+            # HA has already produced sits in the streaming phase until the
+            # cap — the response is ready and nothing plays it (#343).
+            #
+            # STT_VAD_END normally gets here first and this is a no-op. It is
+            # the pipelines that never emit it that strand the turn.
+            self._ha_vad_end.set()
             if self._trace:
                 self._trace.stt_text = text
                 self._trace.t_stt_ms = self._trace.elapsed_ms()
+            # Spoken dismissal of a RINGING alarm is ours to handle: HA has
+            # already discarded the timer by the time it fires, so it would
+            # answer "there are no timers" (see em_timers.is_dismissal). Acted
+            # on here, at the transcript, rather than waiting for a CANCELLED
+            # that structurally cannot arrive.
+            srv = self._owning_server
+            if (srv is not None and srv.timer_ringing
+                    and em_timers.is_dismissal(text)):
+                # Stopping the ring is the generous match; suppressing HA's
+                # reply is NOT. "Turn off the kitchen light" is a dismissal by
+                # the rule above and also a real command HA answers, so the
+                # reply is only swallowed when the utterance is nothing but a
+                # dismissal (em_timers.is_dismissal_only).
+                self._dismissed_alarm = em_timers.is_dismissal_only(text)
+                log.info(
+                    f"[{self._log_name}] Spoken dismissal {text!r} — "
+                    f"stopping alarm locally"
+                    + ("" if self._dismissed_alarm
+                       else "; utterance carries a command, HA's reply stands")
+                )
+                task = asyncio.create_task(srv.dismiss_timer_alarm())
+                self._timer_tasks.add(task)
+                task.add_done_callback(self._timer_tasks.discard)
+                task.add_done_callback(self._log_timer_task_error)
             if self._on_stt_end and not self._turn_cancelled:
                 asyncio.create_task(self._on_stt_end(text))
 
@@ -802,6 +894,7 @@ class EchoMuseSatellite(SatelliteServerProtocol):
                 # Unblocking both waiters mirrors the ERROR path below, which
                 # is the established shape for "HA is done, stop feeding it".
                 self._ha_never_started = True
+                self._run_finished = True
                 self._ha_vad_end.set()
                 self._tts_event.set()
                 return
@@ -817,6 +910,10 @@ class EchoMuseSatellite(SatelliteServerProtocol):
             # through INTENT_END first, so this doesn't add a 30s stall for
             # that case — only a premature RUN_END before INTENT_END is held.
             if self._intent_ended or self._turn_cancelled:
+                # The genuine terminal RUN_END. Nothing more is coming for
+                # this run, so teardown has nothing left to serialise
+                # against — the overwhelmingly common case.
+                self._run_finished = True
                 self._tts_event.set()
             else:
                 log.debug(
@@ -972,11 +1069,13 @@ class EchoMuseSatellite(SatelliteServerProtocol):
         self._turn_active           = True
         self._turn_cancelled        = False
         self._turn_end_reason       = None
+        self._dismissed_alarm       = False
         self._tts_event.clear()
         self._tts_audio_url         = None
         self._tts_audio_data        = None
         self._intent_ended          = False
         self._run_started           = False
+        self._run_finished          = False
         self._ha_never_started      = False
         # Takes ownership of an abort armed during the PREVIOUS turn (at the
         # barge). Deliberately not a plain reset: the arm has to survive this
@@ -1085,6 +1184,9 @@ class EchoMuseSatellite(SatelliteServerProtocol):
             except asyncio.TimeoutError:
                 log.warning(f"[{self._log_name}] Timeout waiting for TTS response from HA")
                 if trace: trace.outcome = "timeout"
+                # HA's run is still live here — that is what a timeout MEANS
+                # — but it is serialised at teardown along with every other
+                # abandoned turn, not on this path. See the note there.
                 return
 
             if self._turn_cancelled:
@@ -1093,6 +1195,18 @@ class EchoMuseSatellite(SatelliteServerProtocol):
                 why = self._turn_end_reason or "cancelled"
                 log.info(f"[{self._log_name}] Turn {why} while waiting for TTS")
                 if trace: trace.outcome = why
+                return
+
+            if self._dismissed_alarm:
+                # We stopped the alarm ourselves off the transcript. HA does
+                # not know the timer existed any more, so its reply is "there
+                # are no timers" — playing it would contradict the alarm that
+                # just stopped, and the silence IS the confirmation.
+                log.info(
+                    f"[{self._log_name}] Alarm dismissed locally — "
+                    f"suppressing HA's reply"
+                )
+                if trace: trace.outcome = "alarm_dismissed"
                 return
 
             if self._tts_audio_url:
@@ -1187,6 +1301,25 @@ class EchoMuseSatellite(SatelliteServerProtocol):
                 # the feed is actually up.
                 self._send_one(self._media_state_msg())
             self._turn_active    = False
+            # A run we started that HA never told us finished is STILL LIVE,
+            # and its RUN_END will land on whichever turn is running when it
+            # arrives — which reads there as "HA ended a run it never
+            # started" and kills that turn in milliseconds.
+            #
+            # This is here rather than on each early return because the
+            # returns are the wrong place to hold the invariant: `timeout`
+            # was fixed on its own path (#329) while `no_speech` — the same
+            # fault, reached whenever a wake fires and nobody speaks — sat
+            # one branch away, its comment asserting there was no in-flight
+            # pipeline three lines after saying HA was listening. Teardown
+            # is the one place every abandoned turn passes through, so a
+            # return added later is covered without anyone remembering.
+            if self._run_started and not self._run_finished:
+                log.debug(
+                    f"[{self._log_name}] Turn ended with HA's run still live "
+                    f"— aborting it so its tail cannot reach the next turn"
+                )
+                self.end_ha_run()
             self._barrier.end_turn()
             self._on_thinking    = None
             self._on_announce    = None
@@ -1620,6 +1753,28 @@ class EchoMuseSatellite(SatelliteServerProtocol):
         # actually written for.
         if self._turn_end_reason is None:
             self._turn_end_reason = "barged"
+        self.end_ha_run()
+
+    def end_ha_run(self) -> None:
+        """
+        Stop HA's pipeline and arm the run barrier. Touches no turn state.
+
+        This is the serialisation on its own, separated from `abort_ha_run`
+        so the turn teardown can use it. Teardown is not a barge: nobody
+        spoke over anything, and letting `abort_ha_run` default
+        `_turn_end_reason` to "barged" there would invent a cause on every
+        turn that simply stopped waiting.
+
+        Idempotent via `_run_finished`, which matters because a barge calls
+        this and then teardown would call it again — a second `start=False`
+        at that point races the interrupting turn's own pipeline, which is
+        the failure this whole mechanism exists to prevent.
+        """
+        if self._run_finished:
+            return
+        # From here on we are done with this run whatever HA does next, and
+        # that is exactly what makes a later event stale.
+        self._run_finished = True
         if self._transport and not self._transport.is_closing():
             self._send_one(api_pb2.VoiceAssistantRequest(start=False))
         # Armed even if the transport is gone: the barrier is cheap, and a
@@ -1840,6 +1995,16 @@ class DeviceESPhomeServer:
         # sends a volume_set control-plane message to the physical device.
         # None when no device is connected.
         self._send_volume_set = None
+        # Injected by device_connected() — the timer-alarm orchestrator. It
+        # lives in em_controller because ringing drives the device speaker,
+        # mic and LEDs (all Device state em_esphome cannot reach). async
+        # callable() each; None when no device is connected.
+        self._ring_alarm = None
+        self._stop_alarm = None
+        # Live-timer state, driven by HA's VoiceAssistantTimerEventResponse
+        # events. On the server (not the satellite) so it survives an HA
+        # reconnect that replaces the satellite mid-countdown.
+        self._timers = em_timers.TimerRegistry()
         # What the DEVICE says it implements, from its register message.
         # Drives which HA entities are advertised — negotiate by capability,
         # never by version (CLAUDE.md).
@@ -1872,6 +2037,56 @@ class DeviceESPhomeServer:
     def set_volume(self, volume: float) -> None:
         """Update stored volume (0.0–1.0) from a device volume_state report."""
         self.volume = max(0.0, min(1.0, volume))
+
+    async def on_timer_event(
+        self,
+        event_type: int,
+        timer_id: str = "",
+        name: str = "",
+        total_seconds: int = 0,
+        seconds_left: int = 0,
+    ) -> None:
+        """
+        Fold one HA timer event into the registry and start/stop the ring.
+
+        STARTED/UPDATED/CANCELLED only move the local state; a FINISHED that
+        begins a ring calls the injected orchestrator. A CANCELLED can still
+        end a ring — the registry handles it, and an HA that behaves that way
+        keeps working — but do not rely on one arriving for a RINGING alarm:
+        HA discards a timer when it finishes, so a spoken dismissal is
+        recognised from the transcript instead (em_timers.is_dismissal).
+        """
+        transition = self._timers.apply(event_type, timer_id)
+        ev_name = {
+            em_timers.TIMER_STARTED:   "started",
+            em_timers.TIMER_UPDATED:   "updated",
+            em_timers.TIMER_CANCELLED: "cancelled",
+            em_timers.TIMER_FINISHED:  "finished",
+        }.get(event_type, str(event_type))
+        log.info(
+            f"[esphome.{self.device_id[-8:]}] timer {ev_name} "
+            f"id={timer_id!r} name={name!r} left={seconds_left}s "
+            f"→ ring={transition} (active={self._timers.active_count()})"
+        )
+        if transition == em_timers.RING_START and self._ring_alarm is not None:
+            await self._ring_alarm()
+        elif transition == em_timers.RING_STOP and self._stop_alarm is not None:
+            await self._stop_alarm()
+
+    async def dismiss_timer_alarm(self) -> bool:
+        """
+        Local dismissal — a dot-button tap, or a spoken one recognised from
+        the transcript. Clears the registry and stops the ring. Returns
+        whether an alarm was actually ringing.
+        """
+        was_ringing = self._timers.clear()
+        if was_ringing and self._stop_alarm is not None:
+            await self._stop_alarm()
+        return was_ringing
+
+    @property
+    def timer_ringing(self) -> bool:
+        return self._timers.ringing
 
     def _protocol_factory(self):
         """
@@ -2441,6 +2656,8 @@ async def device_connected(
     host: str = "0.0.0.0",
     standalone_play=None,
     send_volume_set=None,
+    ring_alarm=None,
+    stop_alarm=None,
 ) -> None:
     """
     Called by em_controller.handle_control() when an Echo Dot connects.
@@ -2458,6 +2675,10 @@ async def device_connected(
     control-plane message to the physical device. Provided by the controller
     as a closure over the Device object. Used by the satellite to forward
     HA MediaPlayerCommandRequest volume changes down to the device.
+
+    ring_alarm / stop_alarm: async callable() — start / stop the timer-alarm
+    ring (chime + LED pulse). Provided by the controller as closures over the
+    Device object, since ringing drives device speaker/mic/LEDs.
     """
     server = _servers.get(device_id)
     if server is None:
@@ -2474,6 +2695,8 @@ async def device_connected(
         server = await _register_device_server(device_id, row["label"])
     server._standalone_play = standalone_play
     server._send_volume_set = send_volume_set
+    server._ring_alarm = ring_alarm
+    server._stop_alarm = stop_alarm
     if server._server is not None:
         log.debug(f"[esphome.{device_id[-8:]}] device_connected: port {server.port} already listening")
         return
@@ -2496,6 +2719,12 @@ async def device_disconnected(device_id: str) -> None:
         log.debug(f"[esphome.{device_id[-8:]}] device_disconnected: port already down")
         return
     server._send_volume_set = None
+    # The device is gone — a ring cannot reach it and its Device state is torn
+    # down, so drop any live timers rather than firing the orchestrator against
+    # a disconnected device. em_controller stops the ring task on its own side.
+    server._timers.clear()
+    server._ring_alarm = None
+    server._stop_alarm = None
     await server.stop()
     log.info(f"[esphome.{device_id[-8:]}] ESPHome port {server.port} down (device disconnected)")
 
@@ -2566,6 +2795,32 @@ def set_device_capabilities(device_id: str, caps: list[str]) -> None:
              + (f", lost {lost}" if lost else "")
              + " — bouncing HA connection so the entity list is rebuilt")
     satellite.disconnect()
+
+
+def clear_timers(device_id: str) -> None:
+    """
+    Drop the timer registry WITHOUT invoking the stop-alarm orchestrator.
+
+    For the ring loop's own safety-cap path: it is already stopping, so it
+    must clear the state (a later CANCELLED then no-ops) without re-entering
+    stop_timer_alarm against the task it is running inside.
+    """
+    server = _servers.get(device_id)
+    if server is not None:
+        server._timers.clear()
+
+
+async def dismiss_timer_alarm(device_id: str) -> bool:
+    """
+    Locally dismiss a ringing timer alarm (dot-button tap, or a spoken
+    dismissal). Returns whether an alarm was actually ringing, so the caller
+    can fall through to normal button behaviour when there was nothing to
+    dismiss.
+    """
+    server = _servers.get(device_id)
+    if server is None:
+        return False
+    return await server.dismiss_timer_alarm()
 
 
 def send_button_event(device_id: str, event_type: str) -> None:
