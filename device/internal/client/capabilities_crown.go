@@ -12,11 +12,19 @@ package client
 // capability is what it should check, never the decorative model string. No
 // "led_anim": there is no ring for a local animation engine to spin frames
 // for. No oww_shadow/oww_trigger: MVP wake word is controller-side. No
-// audio_mix / button_hold / ambient_light yet — not implemented, not
-// announced (ADR-0003: never sniff the model to decide behaviour, only ever
-// add or omit the capability itself).
+// button_hold / ambient_light yet — not implemented, not announced (ADR-0003:
+// never sniff the model to decide behaviour, only ever add or omit the
+// capability itself). "audio_mix" IS announced: pcm_speaker_crown.go holds
+// the same two-plane PumpMusic/SetDuck mixer as biscuit, wired through the
+// same untagged 0x04/0x05 handling in data.go — the only thing crown-specific
+// about playback is that it now goes out over the socket+AudioTrack path
+// (2026-08-26 freeze fix) rather than raw ALSA. Ducking under that path is
+// UNTESTED on real hardware as of this capability landing — the mixer's
+// timing was proven against biscuit's raw-ALSA write, not crown's socket
+// pacing — so a duck that sounds wrong here is a tuning bug, not a "does
+// crown support this at all" question.
 func capabilities() []string {
-	return []string{"mic", "speaker", "leds", "buttons", "display"}
+	return []string{"mic", "speaker", "leds", "buttons", "display", "audio_mix"}
 }
 
 // modelName is decorative (ADR-0003). "crown" is the LineageOS port's own
