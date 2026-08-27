@@ -41,34 +41,40 @@ and testing it against a genuinely fresh device for the first time.
 
 ## What's verified vs NOT
 
-**Verified live, twice, from a genuine factory reset (not a patched-up test
-unit):**
-- Full wizard run start to finish with zero manual `adb shell` intervention
+**Verified live, from a genuine factory reset (not a patched-up test unit),
+including the full voice loop:**
+- Full wizard run start to finish with zero manual `adb shell` intervention,
+  repeated twice
 - `go vet`/`pytest controller/tests/` clean throughout (735 passed, 3
   skipped), `esbuild` syntax-checks `dashboard.jsx` clean at every step
 - Daemon starts, registers, connects over `wss://` with TLS credentials
   installed, speaker path initialises correctly
+- **A real end-to-end voice turn**: wake word detected (`score=0.727`), STT
+  transcript `'What is the time?'`, TTS generated and played back,
+  device-confirmed. The mic-frames scare below turned out to be testing
+  aimed at the wrong device, not a bug — see the correction.
 
-**NOT verified — the actual next thing to chase:**
-- **Wake word does not fire at all**, on either `hey_jarvis` or the custom
-  `Winston` model, and it isn't a threshold/model-selection problem — the
-  controller log shows `OWW: no mic frames for 10s on the continuous wake
-  stream` repeating on every single connect, escalating to a forced
-  disconnect ~90–120s in. Mic frames are not reaching the controller AT ALL.
-  Full detail and the suggested next steps (in order) are in
-  `docs/echo-show-8-journal.md`'s final entry — start there, not from
-  scratch. **This means the full voice loop is not re-confirmed since the
-  crown mic/speaker rewrite** — only speaker output and registration are
-  proven on this exact provisioning path so far.
-- Whether the recurring control-plane keepalive timeout is the SAME root
-  cause as the missing mic frames (a hung capture path stalling the process
-  enough to miss its own pings) or a coincidence — reasoned about, not yet
-  investigated.
-- HA was not pointed at this device this session (a real but separate
-  integration step, not a bug — see the 2026-08-26 entry's identical false
-  alarm) — irrelevant to the mic-frames issue since wake scoring is
-  controller-side and doesn't need HA at all, but still needs doing before an
-  actual end-to-end assist turn can be tested.
+**Resolved, not a bug** — recorded here because it produced real, confusing
+symptoms and is worth knowing about if it looks like it's recurring:
+earlier in this session, wake word appeared to never fire (`hey_jarvis` and
+`Winston` both silent, controller logging `OWW: no mic frames for 10s`
+repeating on every connect) after several factory-reset test cycles. Root
+cause was **testing setup, not the mic pipeline**: the user was speaking near
+an old Echo Dot in the same room, and HA/ESPHome was pointed at the wrong
+device entity while being configured. Once both were corrected, the very
+next attempt worked cleanly. Full account, including what's still a loose
+end (the "no mic frames" log lines themselves weren't fully explained by the
+wrong-device testing and didn't reproduce on the working connection), is in
+`docs/echo-show-8-journal.md`'s final two entries — read the resolution
+entry, not just the investigation that preceded it.
+
+**Added as a side effect of chasing this** (kept regardless, since they're
+useful diagnostics independent of whether this was ever a real bug):
+`PcmMicrophone (crown) initialised` log line (previously absent — the
+speaker binding had one, the mic binding didn't), and rate-limited
+EPIPE-recovery counters in `internal/alsa`'s `Read`/`Write` (previously
+completely silent, which would have hidden a genuine thrashing-recovery
+failure mode indistinguishable from "healthy" in the log).
 
 ## Live device state as of writing this
 
@@ -88,16 +94,23 @@ unit):**
 
 ## Suggested next steps, in order
 
-1. Pick up the mic-frames investigation exactly where
-   `docs/echo-show-8-journal.md`'s last entry leaves it — capture the device
-   log from a fresh connect specifically watching for whether
-   `PcmMicrophone` (or equivalent) ever logs an init line at all.
-2. Once wake word fires again, point HA at this device's freshly-allocated
-   ESPHome port (one-time integration step) and confirm a real end-to-end
-   assist turn.
-3. Only after both of those: pick back up the still-unconfirmed status-bar
-   items from the previous handoff (live wake-turn lighting the bar,
-   wake-from-lock, custom LED colours) — none of that can be tested without
-   wake word working first.
-4. Open the branch as a PR — repeatedly flagged as outstanding across three
-   consecutive handoff docs now.
+1. Pick back up the still-unconfirmed status-bar items from the previous
+   handoff (live wake-turn lighting the bar, wake-from-lock, custom LED
+   colours) — now unblocked, since wake word and the full voice loop are
+   confirmed working.
+2. If `OWW: no mic frames for 10s` ever recurs, it's a real loose end worth
+   a proper look (see the journal's resolution entry) — the two new log
+   lines added this session should make it much faster to root-cause.
+3. Open the branch as a PR — repeatedly flagged as outstanding across three
+   consecutive handoff docs now, and there is no longer an open bug blocking
+   it.
+4. A same-day review (spawned 2026-08-27, four personas) surfaced several
+   independent findings across architecture/testing/security/hardware —
+   some fixed same-session (ADR-0002 amended, `capabilities_crown.go`'s
+   `display` capability + `DeviceIcon`'s model-regex replaced, evdev button
+   nodes resolved by name, a `-tags crown` CI job added), some still open
+   (unauthenticated launcher sockets, `ServerService` not supervising its
+   child process, the ADB private key's indefinite `localStorage` lifetime,
+   a couple of test-coverage gaps). None of the open ones are blocking; see
+   the review's findings in this session's conversation log for the full
+   list if picking them up.
