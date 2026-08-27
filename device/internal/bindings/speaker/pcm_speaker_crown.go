@@ -129,12 +129,17 @@ func (p *PcmSpeaker) EnableSpeakerAmp() {
 	log.Println("[speaker] speaker amp re-enabled")
 }
 
-// silenceLoop mirrors biscuit's pump loop (pcm_speaker.go) exactly — same
-// mix/tap/report sequence — over internal/alsa's blocking Write instead of
-// tinyalsa's AudioSession.Pump. alsa.Open sizes the ALSA ring at periodSize
-// frames with startThreshold==bufferFrames for playback, so Write already
-// blocks at the realtime rate the way Pump did; nothing here needs its own
-// pacing.
+// silenceLoop mirrors biscuit's pump loop (pcm_speaker.go) — same
+// mix/tap/report sequence — but p.pcm is a *socketPCM (see Init above), not
+// a raw *alsa.PCM, so it does NOT get pacing for free the way a blocking
+// ALSA Write does: a socket write returns as soon as the kernel buffer has
+// room, which floods far faster than AudioTrack drains on the far end.
+// socketPCM.Write does its own explicit real-time pacing internally
+// (socket_pcm_crown.go) for exactly that reason — found the hard way
+// (bursty delivery killed the connection after ~0.6-1.3s until pacing was
+// added, docs/echo-show-8-audiotrack-design.md 2026-08-26). Nothing here
+// needs to pace on top of that, but don't read this loop's timing as coming
+// from an ALSA ring — it doesn't, on this path.
 func (p *PcmSpeaker) silenceLoop() {
 	defer close(p.deadCh)
 	for {

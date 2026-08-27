@@ -48,6 +48,11 @@ echo "-- zipalign"
 "$BUILD_TOOLS/zipalign" -f 4 "$OUT/app-unsigned.apk" "$OUT/app-aligned.apk"
 
 echo "-- sign (debug key, generated on first run)"
+# Standard Android debug-keystore convention (storepass/keypass "android"),
+# deliberate for now: this APK is sideloaded to one dev unit, never
+# distributed, so there's no update-integrity story a stable non-debug key
+# would need to protect. Revisit if crown_launcher ever ships over OTA or to
+# more than one device — that's a distribution model this key isn't for.
 KEYSTORE="$HERE/debug.keystore"
 if [ ! -f "$KEYSTORE" ]; then
     keytool -genkeypair -v -keystore "$KEYSTORE" -storepass android -keypass android \

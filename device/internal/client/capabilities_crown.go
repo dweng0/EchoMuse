@@ -18,11 +18,10 @@ package client
 // the same two-plane PumpMusic/SetDuck mixer as biscuit, wired through the
 // same untagged 0x04/0x05 handling in data.go — the only thing crown-specific
 // about playback is that it now goes out over the socket+AudioTrack path
-// (2026-08-26 freeze fix) rather than raw ALSA. Ducking under that path is
-// UNTESTED on real hardware as of this capability landing — the mixer's
-// timing was proven against biscuit's raw-ALSA write, not crown's socket
-// pacing — so a duck that sounds wrong here is a tuning bug, not a "does
-// crown support this at all" question.
+// (2026-08-26 freeze fix) rather than raw ALSA. Ducking under that path has
+// since been confirmed on real hardware (2026-08-27) — music audibly ducks
+// under a voice turn, verified live — so a duck that sounds wrong here is a
+// tuning bug, not a "does crown support this at all" question.
 func capabilities() []string {
 	return []string{"mic", "speaker", "leds", "buttons", "display", "audio_mix"}
 }

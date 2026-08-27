@@ -483,3 +483,29 @@ jobs:
             -v "$PWD/GoTinyAlsa":/GoTinyAlsa \
             echomuse-compiler \
             -c "cd /sdk && go vet -tags crown ./internal/... ./pkg/... ./cmd/..."
+
+  crown-launcher-build:
+    name: crown_launcher build (Java, no gradle)
+    runs-on: ubuntu-latest
+    # device/crown_launcher/ (PlaybackServer, ServerService, StatusOverlay,
+    # BootReceiver — the socket_pcm_crown.go's counterpart on the Android
+    # side) had zero CI coverage at all until this job: build.sh was
+    # hand-invoked only, referenced by no workflow. Found in review
+    # 2026-08-27. This proves the APK still compiles against the manifest
+    # and platform API; it does not run it — that still needs a device.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: android-actions/setup-android@v3
+      - name: Install SDK components build.sh needs
+        run: sdkmanager "platforms;android-30" "build-tools;30.0.3"
+      - name: Build APK
+        working-directory: device/crown_launcher
+        run: |
+          export ANDROID_HOME="$ANDROID_SDK_ROOT"
+          ./build.sh
+      - name: Check the APK exists and is a real zip
+        run: |
+          f=device/crown_launcher/build/crown_launcher.apk
+          test -f "$f" || { echo "::error::$f was not produced"; exit 1; }
+          file "$f" | grep -q "Zip archive" || {
+            echo "::error::$f is not a valid APK/zip"; exit 1; }
