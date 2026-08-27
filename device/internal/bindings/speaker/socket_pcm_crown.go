@@ -45,8 +45,9 @@ const reconnectBackoff = 250 * time.Millisecond
 
 // socketPCM satisfies the same interface as *alsa.PCM (Write/Close) but
 // feeds raw PCM to crown_launcher's AudioTrack-backed playback service
-// over a Unix socket instead of opening /dev/snd directly — see
-// docs/echo-show-8-freeze-scenarios.md, Scenario C. Everything upstream
+// over a Unix socket instead of opening /dev/snd directly — the fix for
+// the mtk_pcm_I2S0dl1 freeze, see docs/echo-show-8-journal.md
+// (2026-08-26 entries). Everything upstream
 // (Mixer, audioStream, silenceLoop's pacing) is unchanged; this only
 // replaces where the final mixed period goes.
 //

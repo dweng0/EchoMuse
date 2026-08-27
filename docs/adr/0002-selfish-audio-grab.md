@@ -4,9 +4,8 @@
 implementation. The mic half still stands as written.** Continuous concurrent
 use of the device as an ordinary Android tablet (browser audio, etc.)
 alongside the raw-ALSA exclusive grab this ADR describes hard-froze the whole
-board — not just the daemon, the SoC — documented in
-`docs/echo-show-8-audio-freeze-handoff.md` and root-caused via pstore in
-`docs/echo-show-8-journal.md` (2026-08-26). The fix
+board — not just the daemon, the SoC — documented and root-caused via
+pstore in `docs/echo-show-8-journal.md` (2026-08-26 entries). The fix
 (`docs/echo-show-8-audiotrack-design.md`, commits `af0b000`/`dfb773b`) routes
 playback through a real Android `AudioTrack` instead, via a socket to
 `crown_launcher`'s `PlaybackServer` — deliberately the opposite of "exclusive

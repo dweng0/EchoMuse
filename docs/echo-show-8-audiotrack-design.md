@@ -1,9 +1,11 @@
 # crown speaker via AudioTrack — design spec (Scenario C)
 
-Follows `docs/echo-show-8-freeze-scenarios.md` (Scenario C verdict: pursue).
-Covers only the **playback** path — `pcm_microphone_crown.go` and the mic
-side of the protocol are untouched, staying raw ALSA, per the freeze doc's
-own reasoning (pstore evidence implicates DL1/playback, not capture).
+Follows the scenario analysis in `docs/echo-show-8-journal.md`'s
+2026-08-26 freeze entries (verdict: pursue routing playback through
+Android's own audio APIs). Covers only the **playback** path —
+`pcm_microphone_crown.go` and the mic side of the protocol are untouched,
+staying raw ALSA, per that reasoning (pstore evidence implicates
+DL1/playback, not capture).
 
 ## Why this instead of A
 

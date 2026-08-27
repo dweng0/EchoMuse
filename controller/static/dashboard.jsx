@@ -5185,9 +5185,9 @@ function CrownProvisionWizard({ token, onClose, knownDevices }) {
   // Step 4 — grant SYSTEM_ALERT_WINDOW. Deliberately unconditional every
   // run, never "if not already granted" — provision_crown.sh's own comment
   // on this exact point: the grant does NOT survive a reinstall (confirmed
-  // live, docs/echo-show-8-status-bar-handoff.md), only an ordinary reboot,
-  // so re-running this after every install_apk is what keeps it correct
-  // rather than silently stale.
+  // live, docs/echo-show-8-journal.md, 2026-08-26 status-indicator entry),
+  // only an ordinary reboot, so re-running this after every install_apk is
+  // what keeps it correct rather than silently stale.
   async function runGrantOverlay(c) {
     await c.shell('appops set com.echomuse.crownlauncher SYSTEM_ALERT_WINDOW allow');
     const check = (await c.shell('appops get com.echomuse.crownlauncher SYSTEM_ALERT_WINDOW')).trim();

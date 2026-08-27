@@ -36,8 +36,8 @@ var silencePeriod = make([]byte, periodBytes)
 // internal/alsa (used already for crown's HW_REFINE probing) needs neither.
 // pcmWriter is satisfied by both *alsa.PCM (raw /dev/snd) and *socketPCM
 // (feeds crown_launcher's AudioTrack service over a Unix socket instead —
-// see socket_pcm_crown.go and docs/echo-show-8-freeze-scenarios.md,
-// Scenario C). silenceLoop and Close only ever call Write/Close, so
+// see socket_pcm_crown.go and docs/echo-show-8-journal.md, 2026-08-26
+// entries). silenceLoop and Close only ever call Write/Close, so
 // nothing else in this file needs to know which one it has.
 type pcmWriter interface {
 	Write(buf []byte) (int, error)
@@ -95,11 +95,10 @@ func (p *PcmSpeaker) Init() error {
 	// crown_launcher's AudioTrack-backed service over a Unix socket
 	// instead, so mediaserver arbitrates the DL1 hardware path normally
 	// rather than contending with an exclusive hold on it (pstore evidence
-	// of that contention wedging the DSP is in
-	// docs/echo-show-8-audio-freeze-handoff.md; the fix is designed in
-	// docs/echo-show-8-audiotrack-design.md and proved live under
-	// concurrent load, see docs/echo-show-8-freeze-scenarios.md, Scenario
-	// C). waitForFreePcm/alsa.Open are gone from this path entirely — the
+	// of that contention wedging the DSP, the fix design, and the live
+	// concurrent-load proof are all in docs/echo-show-8-journal.md,
+	// 2026-08-26 entries, and docs/echo-show-8-audiotrack-design.md).
+	// waitForFreePcm/alsa.Open are gone from this path entirely — the
 	// socket has nothing to wait on, and connecting is handled lazily by
 	// socketPCM itself (see socket_pcm_crown.go).
 	p.pcm = newSocketPCM(crownPlaybackSocket)
