@@ -2732,7 +2732,7 @@ async function _sha256Hex(buf) {
 // 10  wifi             — configure WiFi network                            [inputs]
 // 11  install_em       — push binary + startup script                      [file]
 const _WIZARD_STEPS = [
-  { id: 'connect_android', label: 'Connect Device',     desc: 'Connect the Echo Dot via USB. Device should be on and booted into Android. Appears as "AEOBC" in the USB picker.' },
+  { id: 'connect_android', label: 'Connect Device',     desc: 'Connect the Echo Dot via USB. Device should be on and booted into Android. Appears as "AEOBC" in the USB picker. WebUSB needs a secure context: if the controller is on this same machine, open the dashboard at http://localhost:8768 rather than its LAN IP.' },
   { id: 'connect_twrp',    label: 'Connect to TWRP',   desc: 'Wait for TWRP recovery to appear, then reconnect. Appears as "Echo" in the USB picker.' },
   { id: 'patch_boot',      label: 'Patch Boot Image',  desc: 'Apply SELinux permissive patch and add init.rc service entries.' },
   { id: 'install_magisk',  label: 'Install Magisk',    desc: 'Flash Magisk 17.3 for persistent root access.' },
@@ -2767,7 +2767,7 @@ const _WIZARD_STEPS = [
 //  4  grant_overlay    — appops set SYSTEM_ALERT_WINDOW allow             [auto]
 //  5  start_launcher   — clear stopped-state, start ServerService now     [auto]
 const _CROWN_WIZARD_STEPS = [
-  { id: 'connect',         label: 'Connect Device',    desc: 'Connect the Echo Show 8 via USB, in Android — crown has no recovery-mode step and never leaves Android.' },
+  { id: 'connect',         label: 'Connect Device',    desc: 'Connect the Echo Show 8 via USB, in Android — crown has no recovery-mode step and never leaves Android. WebUSB needs a secure context: if the controller is on this same machine, open the dashboard at http://localhost:8768 rather than its LAN IP — plain HTTP over an IP address will refuse to open the USB picker at all.' },
   { id: 'install_server',  label: 'Install Server',    desc: 'Push the crown-tagged server binary to /data/local/bin/server.' },
   { id: 'tls_creds',       label: 'TLS Credentials',   desc: 'Install device-link TLS credentials so the first connection is wss + token-authenticated (optional — skips to plain ws:// if the controller has no TLS listener).' },
   { id: 'install_apk',     label: 'Install Launcher',  desc: 'Install crown_launcher.apk — the BOOT_COMPLETED → foreground-service autostart path this device needs (raw init cannot exec /data binaries here).' },
