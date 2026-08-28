@@ -507,5 +507,13 @@ jobs:
         run: |
           f=device/crown_launcher/build/crown_launcher.apk
           test -f "$f" || { echo "::error::$f was not produced"; exit 1; }
-          file "$f" | grep -q "Zip archive" || {
-            echo "::error::$f is not a valid APK/zip"; exit 1; }
+          # Not `file "$f" | grep "Zip archive"` — modern libmagic recognises
+          # the APK signature specifically and reports "Android application
+          # package (APK)" instead, which doesn't contain that string and
+          # failed this check on a build.sh output that was actually fine
+          # (found in CI, 2026-08-28). unzip -l on the two files that make it
+          # an APK and not just any zip is what's actually being asked here.
+          unzip -l "$f" | grep -q "AndroidManifest.xml" || {
+            echo "::error::$f has no AndroidManifest.xml — not a valid APK"; exit 1; }
+          unzip -l "$f" | grep -q "classes.dex" || {
+            echo "::error::$f has no classes.dex — not a valid APK"; exit 1; }
