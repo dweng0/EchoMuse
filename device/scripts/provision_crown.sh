@@ -1,24 +1,13 @@
 #!/bin/bash
 # provision_crown.sh — installs EchoMuse onto a crown (Echo Show 8) device
-# and wires up autostart, in one pass.
+# and wires up autostart, in one pass. Single script (not a manual step
+# sequence) so a future dashboard wizard can shell out to it and stream
+# its stdout — every step prints one line before/after for that reason.
 #
-# Deliberately a single script rather than a manual step sequence, so a
-# future dashboard wizard can shell out to this exact thing and stream its
-# stdout, the same relation the existing wizard has to
-# device_payloads/start_server.sh for biscuit.
-# Every step below prints one line before and one after, on purpose, for
-# that streaming case — don't collapse them into a single silent block.
-#
-# What it does NOT do, and why: mint TLS credentials itself. That needs an
-# authenticated call to the controller's admin API
-# (POST /api/provision/tls_credentials), and this script has no browser
-# session to make it with. The existing wizard makes that call from the
-# dashboard's own authenticated JS and would hand this script the resulting
-# ca.pem/token as local files — so that's the contract here too. Run
-# without -c/-t, the device links up plain (ws://), which is the documented
-# rollout fallback (root CLAUDE.md, "Link auth & TLS") — upgrade later with
-# the dashboard's "Secure link" action once the device is already connected
-# and approved, exactly as an already-fielded device would.
+# Does NOT mint TLS credentials itself: that needs an authenticated call
+# to the controller's admin API, which this script has no browser session
+# for. Without -c/-t the device links plain (ws://) — the documented
+# rollout fallback — upgradeable later via the dashboard's "Secure link".
 #
 # Usage:
 #   provision_crown.sh -b build/crown [-a crown_launcher.apk] [-c ca.pem -t token]
@@ -30,12 +19,11 @@
 #   -t  path to a file containing just the token, same call (optional; -c
 #       and -t must be given together or not at all)
 #
-# echomuse_crown.rc / raw init `service` is NOT used here — verified dead on
-# real hardware 2026-08-26 (see docs/echo-show-8-hardware-map.md): init
-# refuses to exec untrusted /data binaries on a non-Magisk device regardless
-# of SELinux mode. crown_launcher.apk (BOOT_COMPLETED receiver -> foreground
-# service -> exec) is the only autostart path that actually survives a
-# power cycle on this device.
+# echomuse_crown.rc / raw init `service` is NOT used here — verified dead
+# on real hardware: init refuses to exec untrusted /data binaries on a
+# non-Magisk device regardless of SELinux mode. crown_launcher.apk
+# (BOOT_COMPLETED -> foreground service -> exec) is the only autostart
+# path that survives a power cycle on this device.
 set -euo pipefail
 
 BINARY=""
@@ -81,13 +69,63 @@ adb root >/dev/null
 sleep 1
 adb wait-for-device
 
+# /dev/snd/* and /dev/input/* ship 0660 (system:audio / root:input) on
+# stock crown — fine for system processes, but the daemon runs as the
+# launcher APK's own sandboxed uid (u0_a###), which is in neither group.
+# Symptom is silent: ServerService's ProcessBuilder starts the daemon fine,
+# it logs "Failed to initialize Microphone: ... permission denied" and
+# exits 1, START_STICKY loops it forever, and the launcher itself looks
+# perfectly healthy in `ps` throughout. Found the hard way on a second
+# crown unit 2026-08-30 — the first had this patched by hand and nobody
+# had folded it back in here yet (docs/echo-show-8-journal.md 2026-08-26).
+#
+# crown has no separate vendor partition (/vendor -> /system/vendor), so
+# the live rule is /system/etc/ueventd.rc. RECORD_AUDIO does not help —
+# that only gates the Binder AudioRecord path, and this daemon opens
+# /dev/snd directly (same as biscuit's tinyalsa approach). A priv-app
+# allowlist doesn't help either — device-node gid membership for real
+# system audio processes comes from a build-time AID, not anything a
+# pushed APK can acquire after install. Patching the node perms is the
+# only lever that actually works from here.
+#
+# Idempotent: skip if a previous run (or a hand-patch, like the first
+# crown) already did this — repatching every provision would be harmless
+# but the reboot it needs is not free.
+CURRENT_SND_PERM="$(adb shell stat -c '%a' /dev/snd/pcmC0D22c 2>/dev/null | tr -d '\r')"
+if [ "$CURRENT_SND_PERM" = "666" ]; then
+    echo "-- /dev/snd already 0666 — ueventd patch not needed"
+else
+    echo "-- patching /system/etc/ueventd.rc: /dev/snd/*, /dev/input/* 0660 -> 0666"
+    adb remount >/dev/null
+    UEVENTD_TMP="$(mktemp)"
+    adb pull /system/etc/ueventd.rc "$UEVENTD_TMP" >/dev/null
+    # Keep one pristine backup on-device, first patch only — never overwrite
+    # it on a later re-run, or it stops being the thing to diff against.
+    adb shell "[ -f /system/etc/ueventd.rc.echomuse-orig ] || cp /system/etc/ueventd.rc /system/etc/ueventd.rc.echomuse-orig"
+    sed -i \
+        -e 's|^/dev/input/\*\(\s*\)0660|/dev/input/*\10666|' \
+        -e 's|^/dev/snd/\*\(\s*\)0660|/dev/snd/*\10666|' \
+        "$UEVENTD_TMP"
+    adb push "$UEVENTD_TMP" /system/etc/ueventd.rc >/dev/null
+    adb shell "chmod 644 /system/etc/ueventd.rc && chown root:root /system/etc/ueventd.rc"
+    rm -f "$UEVENTD_TMP"
+    echo "   done — rebooting to let ueventd re-apply node perms"
+    adb reboot
+    adb wait-for-device
+    # Same race as the adb root above, just longer: a full boot, not adbd.
+    sleep 8
+    adb wait-for-device
+    adb root >/dev/null
+    sleep 1
+    adb wait-for-device
+fi
+
 echo "-- installing binary -> /data/local/bin/server"
 adb shell "mkdir -p /data/local/bin" >/dev/null
 adb push "$BINARY" /data/local/tmp/server.new >/dev/null
 # Move into place rather than pushing directly to the final path: a
 # service could be actively exec'ing the old file mid-push otherwise
-# (ETXTBSY, or worse, a half-written binary getting exec'd on the next
-# crash-restart).
+# (ETXTBSY, or a half-written binary exec'd on the next crash-restart).
 adb shell "mv -f /data/local/tmp/server.new /data/local/bin/server && chmod 755 /data/local/bin/server"
 echo "   done"
 
@@ -106,48 +144,30 @@ adb install -r -g "$APK" >/dev/null
 echo "   done"
 
 echo "-- granting SYSTEM_ALERT_WINDOW (status strip overlay)"
-# SYSTEM_ALERT_WINDOW is a special permission — Android will not grant it
-# via a runtime prompt, only a manual Settings visit or an appops call from
-# a shell that already holds it. Ours does (same root/shell access every
-# other step here uses), so this is unconditional and needs nobody at the
-# device. Without it StatusOverlay logs and no-ops (see
-# StatusOverlay.addView's catch) rather than crashing the service the real
-# daemon lives inside — the strip just never appears.
+# SYSTEM_ALERT_WINDOW is a special permission — Android grants it only via
+# a manual Settings visit or an appops call from a shell that already
+# holds it (ours does). Without it StatusOverlay just logs and no-ops
+# (see StatusOverlay.addView's catch) rather than crashing the service.
 adb shell appops set "$LAUNCHER_PKG" SYSTEM_ALERT_WINDOW allow >/dev/null
 echo "   done"
 
 echo "-- pre-creating the daemon log file (writable by the app's own uid)"
-# ServerService execs the daemon as ITS OWN sandboxed app uid (u0_a147-ish),
-# never root, and redirects stdout to this path via ProcessBuilder. On a
-# device fresh from a factory reset, /data/local/tmp is `drwxrwx--x
-# root:shell` (or shell:shell) — the app uid has EXECUTE on that directory
-# (enough to open a file that already exists) but NOT WRITE (not enough to
-# CREATE one). ProcessBuilder.start() then throws IOException, caught
-# silently by `catch (IOException e) { stopSelf(); }` — no crash, no log
-# line, the launcher app itself keeps running (its playback/overlay sockets
-# still come up), so `ps` shows the app alive and NOTHING else says the
-# daemon never started. Verified live 2026-08-27 on a freshly-reset unit:
-# the log file didn't exist at all after "successful" provisioning, and
-# creating it here (existing-file writes don't need directory WRITE
-# permission, only directory search/execute, which the app already has)
-# fixed it outright — daemon started and registered within 2 seconds.
-# Every previous test unit had this permission loosened by hand at some
-# point and nobody had provisioned a truly fresh device through this exact
-# path before.
+# ServerService execs the daemon as its own sandboxed app uid, never
+# root, and redirects stdout here via ProcessBuilder — but a freshly-reset
+# device's /data/local/tmp lacks directory WRITE for that uid, so
+# ProcessBuilder.start() throws and is caught silently (no crash, no log;
+# `ps` shows the launcher alive but the daemon never started). Pre-creating
+# the file needs only directory search/execute, which the app already has.
 adb shell "touch /data/local/tmp/echomuse.log && chmod 666 /data/local/tmp/echomuse.log"
 echo "   done"
 
 echo "-- clearing Android's 'stopped' state + starting now"
 # A freshly-installed app that has never been run sits in the "stopped"
 # package state, and Android withholds implicit broadcasts — including
-# BOOT_COMPLETED — from stopped apps (measured live 2026-08-26: installed,
-# rebooted, nothing started). Plain `am start-service` hits "Error: app is
-# in background uid null" on such a device (the same background-start
-# restriction a real Context.startService() call faces from Android 8+);
-# `am start-foreground-service` is the shell equivalent of
-# startForegroundService, which both clears the stopped flag permanently
-# AND starts the service immediately, matching the 2026-08-26 finding this
-# script had drifted from.
+# BOOT_COMPLETED — from stopped apps. Plain `am start-service` hits
+# "Error: app is in background uid null" on such a device (Android 8+
+# background-start restriction); `am start-foreground-service` clears the
+# stopped flag permanently AND starts the service immediately.
 adb shell am start-foreground-service -n "$LAUNCHER_SVC" >/dev/null
 echo "   started — tail /data/local/tmp/echomuse.log on-device, or:"
 echo "     adb shell tail -f /data/local/tmp/echomuse.log"
